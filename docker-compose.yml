@@ -1,0 +1,31 @@
+services:
+  bot:
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+    image: ic-data-bot:local
+    env_file: .env
+    # Port santé NON publié : le bot est sortant (Gateway Discord) et le
+    # healthcheck Docker interroge localhost:8080 à l'intérieur du conteneur.
+    # Aucune exposition réseau nécessaire (pas de route Traefik).
+    volumes:
+      - clone:/data/site-infoclimat
+      - state:/var/lib/ic-data-bot
+    restart: unless-stopped
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  clone:
+  state:

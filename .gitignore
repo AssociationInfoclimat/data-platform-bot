@@ -1,0 +1,10 @@
+.env
+.venv/
+snapshot/
+var/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Journaux de conception internes (non publiés)
+docs/superpowers/
