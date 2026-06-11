@@ -341,8 +341,17 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
         # même contexte de 5 tours). Fallback canal si permission manquante.
         target = ch
         if in_main:
+            # Titre du fil : résumé par le modèle (coût ~négligeable), sinon la
+            # question tronquée si l'appel échoue.
+            title = " ".join(question.split())[:80] or "Question data"
             try:
-                title = " ".join(question.split())[:80] or "Question data"
+                r = await _asyncio.to_thread(agent.thread_title, question)
+                app.budget.add(r.tokens)
+                if 0 < len(r.text) <= 95:
+                    title = r.text
+            except Exception:
+                pass
+            try:
                 target = await message.create_thread(name=title, auto_archive_duration=1440)
             except (discord.Forbidden, discord.HTTPException):
                 target = ch  # permission « Créer des fils publics » absente

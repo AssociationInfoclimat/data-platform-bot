@@ -26,6 +26,13 @@ def _count(usage) -> int:
     )
 
 
+TITLE_PROMPT = (
+    "Donne un titre court et descriptif (60 caractères maximum, en français, "
+    "sans guillemets ni point final) pour un fil de discussion qui démarre sur "
+    "la question fournie. Réponds uniquement par le titre, rien d'autre."
+)
+
+
 class DataManagerAgent:
     def __init__(self, client, model: str, max_tokens: int, system_blocks: list[dict], toolbox):
         self.client = client
@@ -33,6 +40,19 @@ class DataManagerAgent:
         self.max_tokens = max_tokens
         self.system_blocks = system_blocks
         self.toolbox = toolbox
+
+    def thread_title(self, question: str) -> AnswerResult:
+        """Titre court pour le fil Discord — appel minimal, sans le gros system
+        prompt ni les outils (≈50 tokens in / 30 out, indépendant du cache)."""
+        resp = self.client.messages.create(
+            model=self.model,
+            max_tokens=30,
+            system=TITLE_PROMPT,
+            messages=[{"role": "user", "content": question[:500]}],
+        )
+        text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+        title = " ".join(text.split()).strip(" \"'«»“”")
+        return AnswerResult(text=title, tokens=_count(resp.usage), iterations=1)
 
     def answer(self, question: str, history: list[dict]) -> AnswerResult:
         messages: list[dict] = list(history) + [{"role": "user", "content": question}]

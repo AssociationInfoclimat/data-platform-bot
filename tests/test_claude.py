@@ -68,3 +68,20 @@ def test_tool_error_is_reported(monkeypatch):
     agent.answer("q", history=[])
     results_turn = client.messages.kwargs[1]["messages"][-1]
     assert results_turn["content"][0]["is_error"] is True
+
+
+def test_thread_title_minimal_call_and_sanitize():
+    client = _FakeClient([
+        SimpleNamespace(stop_reason="end_turn",
+                        content=[_text('  "Piège dh_usec : millisecondes"\n')],
+                        usage=_usage(40, 12)),
+    ])
+    agent = DataManagerAgent(client, "claude-haiku-4-5", 3000, [{"type": "text", "text": "sys"}], _Box())
+    res = agent.thread_title("dans la table foudre, que contient dh_usec ?")
+    assert res.text == "Piège dh_usec : millisecondes"   # guillemets/espaces nettoyés
+    assert res.tokens == 52
+    # appel minimal : pas le gros system, pas d'outils, max_tokens borné
+    kw = client.messages.kwargs[0]
+    assert kw["max_tokens"] == 30
+    assert "tools" not in kw
+    assert "fil de discussion" in kw["system"]
