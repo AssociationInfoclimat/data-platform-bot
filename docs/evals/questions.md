@@ -63,3 +63,25 @@ pour nuancer. `iters` attendu : **3** (lineage → read_file contrat → synthè
 
 **Leçon :** avec Haiku, une consigne de synthèse se place dans le **résultat**
 de l'outil (lue au moment de la synthèse), pas dans sa description.
+
+---
+
+## E4 — Jointure overlay ops privé + sources publiques
+
+> @bot-data-ic sur quel hôte tourne TimescaleDB et c'est quoi son IP ?
+
+L'IP n'existe que dans l'overlay privé `_ops/ops-mapping.yaml` (absent du
+repo public) ; les détails techniques (versions, volumétrie) sont dans les
+audits publics. Réussir = joindre les deux.
+
+**Critères :**
+1. Hôte logique (ct-timescale) ET l'IP interne — celle-ci ne peut venir
+   que de `_ops/` (la vérifier contre le mapping, ne pas la documenter ici)
+2. Enrichissement depuis les sources publiques (versions PG/Timescale,
+   volumétrie, hypertables)
+3. Sources citées, dont `_ops/ops-mapping.yaml`
+
+**Échec typique :** « l'IP ne figure pas dans le snapshot » → l'overlay
+n'est pas installé (vérifier `_ops/` dans le snapshot) ou pas joint.
+
+**Baseline 2026-06-11 :** ✅ 3/3 (jointure _ops + registre public + audits).
