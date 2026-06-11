@@ -20,12 +20,20 @@ NO_BUDGET_MSG = "Le budget quotidien du bot est atteint, réessaie demain. 💤"
 ERROR_MSG = "J'ai rencontré un souci technique en interrogeant le modèle, réessaie dans un moment. ⚙️"
 
 
-def should_respond(*, author_is_bot: bool, channel_id: int, allowed_channel_id: int, mentioned: bool) -> bool:
+def should_respond(*, author_is_bot: bool, channel_id: int, allowed_channel_id: int,
+                   mentioned: bool, parent_channel_id: int | None = None,
+                   is_bot_thread: bool = False) -> bool:
+    """Répondre si : canal autorisé (ou fil dont le parent est le canal autorisé)
+    ET (mention du bot OU fil ouvert par le bot — pas besoin de re-mentionner)."""
     if author_is_bot:
         return False
-    if not is_allowed_channel(channel_id, allowed_channel_id):
+    in_scope = is_allowed_channel(channel_id, allowed_channel_id) or (
+        parent_channel_id is not None
+        and is_allowed_channel(parent_channel_id, allowed_channel_id)
+    )
+    if not in_scope:
         return False
-    return mentioned
+    return mentioned or is_bot_thread
 
 
 def split_for_discord(text: str, limit: int = 1900, max_messages: int = 3) -> list[str]:
@@ -220,13 +228,20 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
 
     @discord_client.event
     async def on_message(message: "discord.Message") -> None:
-        # Commandes utilitaires, sans appel au modèle (coût zéro).
+        ch = message.channel
+        in_main = ch.id == cfg.allowed_channel_id
+        in_thread = isinstance(ch, discord.Thread) and ch.parent_id == cfg.allowed_channel_id
+        # Fil ouvert par le bot : on y répond sans exiger une nouvelle mention.
+        in_bot_thread = in_thread and ch.owner_id == discord_client.user.id
+
+        # Commandes utilitaires, sans appel au modèle (coût zéro) — valides dans
+        # le canal ET dans ses fils (!fix s'utilise surtout en réponse, dans un fil).
         raw = message.content.strip()
         cmd_word = raw.split()[0].lower() if raw.startswith("!") else ""
         if (
             cmd_word
             and not message.author.bot
-            and message.channel.id == cfg.allowed_channel_id
+            and (in_main or in_thread)
         ):
             if cmd_word == "!version":
                 sha = os.getenv("GIT_SHA", "dev")
@@ -307,9 +322,11 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
         )
         if not should_respond(
             author_is_bot=message.author.bot,
-            channel_id=message.channel.id,
+            channel_id=ch.id,
             allowed_channel_id=cfg.allowed_channel_id,
             mentioned=mentioned,
+            parent_channel_id=ch.parent_id if in_thread else None,
+            is_bot_thread=in_bot_thread,
         ):
             return
         content = message.content
@@ -318,12 +335,27 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
         for rid in bot_role_ids:
             content = content.replace(f"<@&{rid}>", "")
         question = content.strip()
-        thread_id = str(message.channel.id)
-        async with message.channel.typing():
+
+        # Question dans le canal principal → ouvrir un fil dédié : l'historique
+        # de conversation est isolé par fil (sinon tous les devs partagent le
+        # même contexte de 5 tours). Fallback canal si permission manquante.
+        target = ch
+        if in_main:
+            try:
+                title = " ".join(question.split())[:80] or "Question data"
+                target = await message.create_thread(name=title, auto_archive_duration=1440)
+            except (discord.Forbidden, discord.HTTPException):
+                target = ch  # permission « Créer des fils publics » absente
+
+        thread_id = str(target.id)
+        async with target.typing():
             reply = await app.process(user_id=str(message.author.id), thread_id=thread_id, question=question)
         chunks = split_for_discord(reply)
-        await message.reply(chunks[0])
+        if target is ch:
+            await message.reply(chunks[0])
+        else:
+            await target.send(chunks[0])
         for chunk in chunks[1:]:
-            await message.channel.send(chunk)
+            await target.send(chunk)
 
     discord_client.run(cfg.discord_bot_token)

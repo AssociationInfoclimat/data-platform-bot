@@ -159,3 +159,16 @@ def test_split_caps_at_max_messages():
     assert len(chunks) == 3
     assert chunks[-1].endswith("*[réponse écourtée]*")
     assert all(len(c) <= 1900 for c in chunks)
+
+
+def test_should_respond_in_threads():
+    base = dict(author_is_bot=False, channel_id=999, allowed_channel_id=1, mentioned=False)
+    # fil dont le parent est le canal autorisé + fil du bot → répond sans mention
+    assert should_respond(**base, parent_channel_id=1, is_bot_thread=True)
+    # fil du canal autorisé mais pas ouvert par le bot → mention requise
+    assert not should_respond(**base, parent_channel_id=1, is_bot_thread=False)
+    assert should_respond(**{**base, "mentioned": True}, parent_channel_id=1)
+    # fil d'un AUTRE canal → jamais, même mentionné et fil du bot
+    assert not should_respond(**{**base, "mentioned": True}, parent_channel_id=42, is_bot_thread=True)
+    # un bot reste ignoré partout
+    assert not should_respond(**{**base, "author_is_bot": True}, parent_channel_id=1, is_bot_thread=True)
