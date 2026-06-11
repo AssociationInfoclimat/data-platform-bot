@@ -32,6 +32,13 @@ TITLE_PROMPT = (
     "la question fournie. Réponds uniquement par le titre, rien d'autre."
 )
 
+ISSUE_TITLE_PROMPT = (
+    "Donne un titre court et descriptif (70 caractères maximum, en français, "
+    "sans guillemets ni point final) pour une issue de correction de la "
+    "documentation data, à partir du signalement fourni. Réponds uniquement "
+    "par le titre, rien d'autre."
+)
+
 
 class DataManagerAgent:
     def __init__(self, client, model: str, max_tokens: int, system_blocks: list[dict], toolbox):
@@ -41,13 +48,13 @@ class DataManagerAgent:
         self.system_blocks = system_blocks
         self.toolbox = toolbox
 
-    def thread_title(self, question: str) -> AnswerResult:
-        """Titre court pour le fil Discord — appel minimal, sans le gros system
-        prompt ni les outils (≈50 tokens in / 30 out, indépendant du cache)."""
+    def thread_title(self, question: str, prompt: str = TITLE_PROMPT) -> AnswerResult:
+        """Titre court (fil Discord, issue…) — appel minimal, sans le gros
+        system prompt ni les outils (≈50 tokens in / 30 out, hors cache)."""
         resp = self.client.messages.create(
             model=self.model,
             max_tokens=30,
-            system=TITLE_PROMPT,
+            system=prompt,
             messages=[{"role": "user", "content": question[:500]}],
         )
         text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")

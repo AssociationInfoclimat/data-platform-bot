@@ -85,3 +85,16 @@ def test_thread_title_minimal_call_and_sanitize():
     assert kw["max_tokens"] == 30
     assert "tools" not in kw
     assert "fil de discussion" in kw["system"]
+
+
+def test_thread_title_custom_prompt():
+    from ic_data_bot.claude import ISSUE_TITLE_PROMPT
+    client = _FakeClient([
+        SimpleNamespace(stop_reason="end_turn",
+                        content=[_text("Type réel de dh_usec à corriger")],
+                        usage=_usage(30, 10)),
+    ])
+    agent = DataManagerAgent(client, "claude-haiku-4-5", 3000, [], _Box())
+    res = agent.thread_title("la colonne dh_usec est en ms pas en µs", ISSUE_TITLE_PROMPT)
+    assert res.text == "Type réel de dh_usec à corriger"
+    assert "issue de correction" in client.messages.kwargs[0]["system"]

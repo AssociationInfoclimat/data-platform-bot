@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from .claude import DataManagerAgent
+from .claude import ISSUE_TITLE_PROMPT, DataManagerAgent
 from .config import load_config
 from .context import build_system_blocks, format_contracts_message
 from .corrections import CorrectionsStore
@@ -309,10 +309,19 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
                         issue_note = ("\n⚠️ Détails internes détectés → pas d'issue publique. "
                                       "À reporter manuellement si besoin (en version expurgée).")
                     else:
+                        issue_title = text[:80]
+                        try:
+                            r = await _asyncio.to_thread(
+                                agent.thread_title, text, ISSUE_TITLE_PROMPT)
+                            app.budget.add(r.tokens)
+                            if 0 < len(r.text) <= 90:
+                                issue_title = r.text
+                        except Exception:
+                            pass
                         try:
                             issue_no, issue_url = await _asyncio.to_thread(
                                 create_issue, cfg.github_issues_repo, cfg.github_token,
-                                f"[errata bot] {text[:80]}",
+                                f"[errata bot] {issue_title}",
                                 issue_body(author, text, ref, n_next),
                             )
                             issue_note = f"\n🐙 Issue ouverte : <{issue_url}>"
