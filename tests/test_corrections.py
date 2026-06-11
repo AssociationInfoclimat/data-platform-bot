@@ -19,9 +19,10 @@ def test_add_persist_reload_remove(tmp_path):
     assert store2.items()[0]["author"] == "pam"
     assert store2.items()[0]["ref"].startswith("toto est")
 
-    assert store2.remove(1) is True
+    removed = store2.remove(1)
+    assert removed["author"] == "pam"          # l'item retiré est renvoyé
     assert len(CorrectionsStore(p).items()) == 1
-    assert store2.remove(99) is False
+    assert store2.remove(99) is None
 
 
 def test_text_capped_and_max_items(tmp_path):
@@ -57,3 +58,11 @@ def test_render_block_and_placement_after_cache_breakpoint(tmp_path):
 def test_render_none_when_empty(tmp_path):
     store = CorrectionsStore(tmp_path / "c.jsonl")
     assert store.render_system_block() is None
+
+
+def test_add_with_issue_number(tmp_path):
+    store = CorrectionsStore(tmp_path / "c.jsonl")
+    store.add("pam", "toto type B", issue=42)
+    item = CorrectionsStore(tmp_path / "c.jsonl").items()[0]
+    assert item["issue"] == 42
+    assert store.remove(1)["issue"] == 42

@@ -21,6 +21,8 @@ class Config:
     budget_state_path: str
     corrections_path: str
     ops_mapping_path: str
+    github_token: str
+    github_issues_repo: str
     history_ttl_seconds: int
     history_max_turns: int
     repo_url: str
@@ -56,6 +58,8 @@ def load_config(env: Mapping[str, str]) -> Config:
         budget_state_path=env.get("BUDGET_STATE_PATH") or "./var/token_budget.json",
         corrections_path=env.get("CORRECTIONS_PATH") or "./var/corrections.jsonl",
         ops_mapping_path=env.get("OPS_MAPPING_PATH") or "./var/ops-mapping.yaml",
+        github_token=env.get("GITHUB_TOKEN") or "",
+        github_issues_repo=env.get("GITHUB_ISSUES_REPO") or "AssociationInfoclimat/data-platform",
         history_ttl_seconds=_int("HISTORY_TTL_SECONDS", 1800),
         history_max_turns=_int("HISTORY_MAX_TURNS", 5),
         repo_url=env.get("REPO_URL") or "",

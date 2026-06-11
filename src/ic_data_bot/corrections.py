@@ -41,7 +41,8 @@ class CorrectionsStore:
         payload = "\n".join(json.dumps(i, ensure_ascii=False) for i in self._items)
         self.path.write_text(payload + "\n" if payload else "", encoding="utf-8")
 
-    def add(self, author: str, text: str, ref_excerpt: str | None = None) -> int:
+    def add(self, author: str, text: str, ref_excerpt: str | None = None,
+            issue: int | None = None) -> int:
         item = {
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "author": author,
@@ -49,18 +50,21 @@ class CorrectionsStore:
         }
         if ref_excerpt:
             item["ref"] = ref_excerpt[:150]
+        if issue:
+            item["issue"] = issue
         self._items.append(item)
         del self._items[: max(0, len(self._items) - self.max_items)]
         self._save()
         return len(self._items)
 
-    def remove(self, index: int) -> bool:
-        """index 1-based, tel qu'affiché par !fixes."""
+    def remove(self, index: int) -> dict | None:
+        """index 1-based, tel qu'affiché par !fixes. Renvoie l'item retiré
+        (pour fermer son issue GitHub éventuelle), ou None."""
         if 1 <= index <= len(self._items):
-            del self._items[index - 1]
+            item = self._items.pop(index - 1)
             self._save()
-            return True
-        return False
+            return item
+        return None
 
     def items(self) -> list[dict]:
         return list(self._items)

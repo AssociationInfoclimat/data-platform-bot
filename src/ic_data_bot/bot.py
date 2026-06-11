@@ -12,6 +12,7 @@ from .claude import DataManagerAgent
 from .config import load_config
 from .context import build_system_blocks, format_contracts_message
 from .corrections import CorrectionsStore
+from .github_issues import close_issue, contains_internal_details, create_issue, issue_body
 from .guardrails import DailyBudget, RateLimiter, is_allowed_channel
 from .tools import ToolBox
 
@@ -298,11 +299,31 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
                 resolved = message.reference.resolved if message.reference else None
                 if resolved is not None and getattr(resolved, "author", None) == discord_client.user:
                     ref = (resolved.content or "").strip()[:150]
-                n = corrections.add(str(message.author.display_name), text, ref)
+                author = str(message.author.display_name)
+                n_next = len(corrections.items()) + 1
+                issue_no, issue_note = None, ""
+                if cfg.github_token:
+                    # data-platform est PUBLIC : pas d'issue si la correction
+                    # (ou l'extrait cité) contient des détails d'infra interne.
+                    if contains_internal_details(text) or contains_internal_details(ref or ""):
+                        issue_note = ("\n⚠️ Détails internes détectés → pas d'issue publique. "
+                                      "À reporter manuellement si besoin (en version expurgée).")
+                    else:
+                        try:
+                            issue_no, issue_url = await _asyncio.to_thread(
+                                create_issue, cfg.github_issues_repo, cfg.github_token,
+                                f"[errata bot] {text[:80]}",
+                                issue_body(author, text, ref, n_next),
+                            )
+                            issue_note = f"\n🐙 Issue ouverte : <{issue_url}>"
+                        except Exception:
+                            issue_note = "\n⚠️ Création de l'issue GitHub échouée (erratum enregistré quand même)."
+                n = corrections.add(author, text, ref, issue=issue_no)
                 agent.system_blocks = build_system_blocks(Path(cfg.snapshot_dir), corrections)
                 await message.reply(
-                    f"✅ Erratum **#{n}** enregistré — pris en compte dès la prochaine question.\n"
-                    f"_Pense à corriger `data-platform/` en amont, puis `!unfix {n}`. Liste : `!fixes`._"
+                    f"✅ Erratum **#{n}** enregistré — pris en compte dès la prochaine question."
+                    f"{issue_note}\n"
+                    f"_Après correction dans data-platform : `!refresh` puis `!unfix {n}`._"
                 )
                 return
             if cmd_word == "!fixes":
@@ -312,15 +333,27 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
                     return
                 lines = [f"🩹 **Errata actifs ({len(items)})** — prioritaires sur le snapshot"]
                 for i, it in enumerate(items, 1):
-                    lines.append(f"{i}. [{it['ts'][:10]}, {it['author']}] {it['text'][:150]}")
+                    issue = f" · issue #{it['issue']}" if it.get("issue") else ""
+                    lines.append(f"{i}. [{it['ts'][:10]}, {it['author']}] {it['text'][:150]}{issue}")
                 lines.append("_Retrait après correction dans data-platform : `!unfix <n>`._")
                 await message.reply("\n".join(lines)[:1900])
                 return
             if cmd_word == "!unfix":
                 arg = raw[len("!unfix"):].strip()
-                if arg.isdigit() and corrections.remove(int(arg)):
+                removed = corrections.remove(int(arg)) if arg.isdigit() else None
+                if removed is not None:
                     agent.system_blocks = build_system_blocks(Path(cfg.snapshot_dir), corrections)
-                    await message.reply(f"🗑️ Erratum #{arg} retiré.")
+                    note = ""
+                    if removed.get("issue") and cfg.github_token:
+                        try:
+                            await _asyncio.to_thread(
+                                close_issue, cfg.github_issues_repo, cfg.github_token,
+                                removed["issue"], "Corrigé — erratum retiré du bot via `!unfix`.",
+                            )
+                            note = f" Issue #{removed['issue']} fermée."
+                        except Exception:
+                            note = f" (Échec de fermeture de l'issue #{removed['issue']} — à fermer à la main.)"
+                    await message.reply(f"🗑️ Erratum #{arg} retiré.{note}")
                 else:
                     await message.reply("Usage : `!unfix <n>` — numéro affiché par `!fixes`.")
                 return
