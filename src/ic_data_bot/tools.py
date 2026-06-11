@@ -15,6 +15,7 @@ LINEAGE_FILES = [
     "inventory/external-sources.yaml",
     "inventory/storage-systems.yaml",
     "lineage/jobs.yaml",
+    "_ops/ops-mapping.yaml",
 ]
 MAX_LINEAGE_ENTRIES_PER_FILE = 6
 MAX_LINEAGE_ENTRY_CHARS = 1200

@@ -34,13 +34,18 @@ def test_sync_clones_when_absent(tmp_path):
     clone_dir = tmp_path / "repo"   # pas de .git -> clone
     sync(clone_dir, "https://host/x.git", "u", "t", "main", runner=r)
     assert r.calls[0][:3] == ["git", "clone", "--filter=blob:none"]
-    assert "--sparse" in r.calls[0]
+    assert "--sparse" not in r.calls[0]
     assert "--branch" in r.calls[0] and "main" in r.calls[0]
     assert "https://u:t@host/x.git" in r.calls[0]
-    assert r.calls[1][:4] == ["git", "-C", str(clone_dir), "sparse-checkout"]
-    assert "data-platform/" in r.calls[1]
     assert any(c[:3] == ["git", "-C", str(clone_dir)] and "set-url" in c and "https://host/x.git" in c
                for c in r.calls)
+
+def test_sync_clones_anonymously_without_creds(tmp_path):
+    r = _Runner()
+    clone_dir = tmp_path / "repo"   # repo public -> pas de créds
+    sync(clone_dir, "https://host/x.git", "", "", "main", runner=r)
+    assert "https://host/x.git" in r.calls[0]
+    assert not any("@" in str(a) for a in r.calls[0])
 
 def test_sync_pulls_when_present(tmp_path):
     r = _Runner()

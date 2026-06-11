@@ -172,3 +172,33 @@ def test_should_respond_in_threads():
     assert not should_respond(**{**base, "mentioned": True}, parent_channel_id=42, is_bot_thread=True)
     # un bot reste ignoré partout
     assert not should_respond(**{**base, "author_is_bot": True}, parent_channel_id=1, is_bot_thread=True)
+
+
+def test_install_ops_overlay(tmp_path):
+    from ic_data_bot.bot import install_ops_overlay
+
+    ops = tmp_path / "state" / "ops-mapping.yaml"
+    ops.parent.mkdir()
+    ops.write_text("version: 1\nops_storage_systems:\n  - id: mariadb-prod\n    host_ip: 192.0.2.1\n")
+    snap = tmp_path / "snap"; snap.mkdir()
+
+    assert install_ops_overlay(snap, ops) is True
+    assert (snap / "_ops" / "ops-mapping.yaml").read_text().startswith("version: 1")
+    # absent → no-op
+    assert install_ops_overlay(snap, tmp_path / "nope.yaml") is False
+
+
+def test_refresh_once_reinstalls_overlay(tmp_path):
+    from types import SimpleNamespace
+    from ic_data_bot.bot import install_ops_overlay  # noqa: F401
+
+    _min_snapshot(tmp_path, "v1")
+    ops = tmp_path / "ops-src.yaml"
+    ops.write_text("version: 1\nops_pipelines: []\n")
+    agent = SimpleNamespace(system_blocks=None)
+    ok = refresh_once(agent, tmp_path, sync_fn=lambda: None, ops_path=ops)
+    assert ok is True
+    assert (tmp_path / "_ops" / "ops-mapping.yaml").is_file()
+    # le résumé des registres mentionne l'overlay
+    joined = "\n".join(b["text"] for b in agent.system_blocks)
+    assert "_ops/ops-mapping.yaml" in joined and "INTERNE" in joined

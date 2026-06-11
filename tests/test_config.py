@@ -32,7 +32,7 @@ def test_load_config_deploy_defaults():
     assert cfg.health_port == 8080
     assert cfg.health_bind == "0.0.0.0"
     assert cfg.refresh_interval_seconds == 3600
-    assert cfg.branch == "feat/data-platform-bootstrap"
+    assert cfg.branch == "main"
     assert cfg.repo_url == ""
     assert cfg.gitlab_deploy_user == ""
     assert cfg.gitlab_deploy_token == ""

@@ -109,3 +109,21 @@ def test_lineage_caps_entries(tmp_path):
     out = ToolBox(tmp_path).lineage("commun")
     assert "10 entrée(s)" in out
     assert "affine avec grep" in out  # 6 affichées, 4 signalées
+
+
+def test_lineage_includes_ops_overlay(tmp_path):
+    from ic_data_bot.tools import ToolBox
+
+    root = _lineage_snapshot(tmp_path)
+    opsdir = root / "_ops"; opsdir.mkdir()
+    (opsdir / "ops-mapping.yaml").write_text(
+        "version: 1\nops_storage_systems:\n"
+        "  - id: mariadb-prod\n    host_ip: 192.0.2.1 (ct-mariadb-1)\n"
+        "ops_pipelines:\n"
+        "  - id: cron.recup-blitzortung\n    notes: chemin reel /var/scripts/foudre\n"
+    )
+    out = ToolBox(root).lineage("foudre")
+    assert "_ops/ops-mapping.yaml" in out
+    assert "/var/scripts/foudre" in out      # le delta ops rejoint la jointure
+    out2 = ToolBox(root).lineage("mariadb-prod")
+    assert "192.0.2.1" in out2

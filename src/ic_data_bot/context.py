@@ -165,6 +165,12 @@ def build_system_blocks(root: Path, corrections=None) -> list[dict]:
     # Résumés chiffrés des gros registres + jobs lineage
     summaries = [summarize_registry(root / rel) for rel in REGISTRY_FILES]
     summaries.append(summarize_jobs(root / "lineage" / "jobs.yaml"))
+    if (root / "_ops" / "ops-mapping.yaml").is_file():
+        summaries.append(
+            "_ops/ops-mapping.yaml : mapping ops INTERNE (IP, hôtes, chemins réels) — "
+            "absent du repo public ; source prioritaire pour les questions "
+            "d'exploitation, joint automatiquement par l'outil lineage"
+        )
     parts.append(
         "### Registres (résumé — outil lineage pour l'impact/les dépendances, read_file/grep pour le détail)\n"
         + "\n".join(summaries)

@@ -20,6 +20,7 @@ class Config:
     tool_read_max_bytes: int
     budget_state_path: str
     corrections_path: str
+    ops_mapping_path: str
     history_ttl_seconds: int
     history_max_turns: int
     repo_url: str
@@ -54,13 +55,14 @@ def load_config(env: Mapping[str, str]) -> Config:
         tool_read_max_bytes=_int("TOOL_READ_MAX_BYTES", 60_000),
         budget_state_path=env.get("BUDGET_STATE_PATH") or "./var/token_budget.json",
         corrections_path=env.get("CORRECTIONS_PATH") or "./var/corrections.jsonl",
+        ops_mapping_path=env.get("OPS_MAPPING_PATH") or "./var/ops-mapping.yaml",
         history_ttl_seconds=_int("HISTORY_TTL_SECONDS", 1800),
         history_max_turns=_int("HISTORY_MAX_TURNS", 5),
         repo_url=env.get("REPO_URL") or "",
         gitlab_deploy_user=env.get("GITLAB_DEPLOY_USER") or "",
         gitlab_deploy_token=env.get("GITLAB_DEPLOY_TOKEN") or "",
         clone_dir=env.get("CLONE_DIR") or "",
-        branch=env.get("REPO_BRANCH") or "feat/data-platform-bootstrap",
+        branch=env.get("REPO_BRANCH") or "main",
         health_port=_int("HEALTH_PORT", 8080),
         health_bind=env.get("HEALTH_BIND") or "0.0.0.0",
         refresh_interval_seconds=_int("REFRESH_INTERVAL_SECONDS", 3600),

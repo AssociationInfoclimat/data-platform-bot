@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-SPARSE_PATHS = ["data-platform/"]
 
 
 def build_clone_url(repo_url: str, username: str, token: str) -> str:
@@ -27,17 +26,17 @@ def build_clone_url(repo_url: str, username: str, token: str) -> str:
 
 
 def sync(clone_dir, repo_url: str, username: str, token: str, branch: str,
-         sparse_paths=SPARSE_PATHS, runner=subprocess.run) -> None:
-    """Clone (sparse/partial) si absent, sinon pull --ff-only. Le token n'est
-    jamais persisté dans .git/config (origin remis sur l'URL propre après clone ;
+         runner=subprocess.run) -> None:
+    """Clone (partial) si absent, sinon pull --ff-only. Repo public : clone
+    anonyme si aucune créd fournie. Si un token est fourni, il n'est jamais
+    persisté dans .git/config (origin remis sur l'URL propre après clone ;
     pull avec URL authentifiée inline)."""
     clone_dir = Path(clone_dir)
-    auth_url = build_clone_url(repo_url, username, token)
+    auth_url = build_clone_url(repo_url, username, token) if (username or token) else repo_url
     if not (clone_dir / ".git").is_dir():
         clone_dir.parent.mkdir(parents=True, exist_ok=True)
-        runner(["git", "clone", "--filter=blob:none", "--sparse", "--branch", branch,
+        runner(["git", "clone", "--filter=blob:none", "--branch", branch,
                 auth_url, str(clone_dir)], check=True)
-        runner(["git", "-C", str(clone_dir), "sparse-checkout", "set", *sparse_paths], check=True)
         runner(["git", "-C", str(clone_dir), "remote", "set-url", "origin", repo_url], check=True)
     else:
         runner(["git", "-C", str(clone_dir), "pull", "--ff-only", auth_url, branch], check=True)
@@ -45,10 +44,10 @@ def sync(clone_dir, repo_url: str, username: str, token: str, branch: str,
 
 def main() -> int:
     repo_url = os.environ["REPO_URL"]
-    username = os.environ["GITLAB_DEPLOY_USER"]
-    token = os.environ["GITLAB_DEPLOY_TOKEN"]
+    username = os.environ.get("GITLAB_DEPLOY_USER", "")
+    token = os.environ.get("GITLAB_DEPLOY_TOKEN", "")
     clone_dir = Path(os.environ["CLONE_DIR"])
-    branch = os.environ.get("REPO_BRANCH", "feat/data-platform-bootstrap")
+    branch = os.environ.get("REPO_BRANCH", "main")
     existed = (clone_dir / ".git").is_dir()
     try:
         sync(clone_dir, repo_url, username, token, branch)

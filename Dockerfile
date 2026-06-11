@@ -23,7 +23,7 @@ ENV GIT_SHA=$GIT_SHA
 
 # Utilisateur non-root + répertoires de données inscriptibles
 RUN useradd -m -u 10001 botuser \
- && mkdir -p /data/site-infoclimat /var/lib/ic-data-bot \
+ && mkdir -p /data/data-platform /var/lib/ic-data-bot \
  && chown -R botuser:botuser /app /data /var/lib/ic-data-bot
 USER botuser
 

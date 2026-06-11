@@ -86,11 +86,26 @@ def format_budget_message(budget) -> str:
     )
 
 
-def refresh_once(agent, snapshot_dir, *, sync_fn, corrections=None) -> bool:
-    """Un cycle de refresh : pull (sync_fn) puis reconstruction du noyau.
-    Ne lève jamais ; renvoie False si le cycle a échoué (noyau inchangé)."""
+def install_ops_overlay(snapshot_dir, ops_path) -> bool:
+    """Copie le mapping ops interne (volume persistant, jamais dans le repo
+    public) dans le snapshot sous _ops/ : les outils read_file/grep/lineage
+    le voient comme n'importe quel registre."""
+    src = Path(ops_path)
+    if not src.is_file():
+        return False
+    dst = Path(snapshot_dir) / "_ops" / "ops-mapping.yaml"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(src.read_bytes())
+    return True
+
+
+def refresh_once(agent, snapshot_dir, *, sync_fn, corrections=None, ops_path=None) -> bool:
+    """Un cycle de refresh : pull (sync_fn), réinstallation de l'overlay ops,
+    puis reconstruction du noyau. Ne lève jamais ; False si échec (noyau inchangé)."""
     try:
         sync_fn()
+        if ops_path:
+            install_ops_overlay(snapshot_dir, ops_path)
         agent.system_blocks = build_system_blocks(Path(snapshot_dir), corrections)
         return True
     except Exception:
@@ -177,6 +192,7 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
     from . import gitsync
 
     snapshot = Path(cfg.snapshot_dir)
+    install_ops_overlay(snapshot, cfg.ops_mapping_path)
     corrections = CorrectionsStore(Path(cfg.corrections_path))
     system_blocks = build_system_blocks(snapshot, corrections)
     toolbox = ToolBox(snapshot, max_bytes=cfg.tool_read_max_bytes)
@@ -213,7 +229,8 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
         while True:
             await _asyncio.sleep(cfg.refresh_interval_seconds)
             await _asyncio.to_thread(refresh_once, agent, cfg.snapshot_dir,
-                                     sync_fn=_sync, corrections=corrections)
+                                     sync_fn=_sync, corrections=corrections,
+                                     ops_path=cfg.ops_mapping_path)
 
     @discord_client.event
     async def setup_hook():
@@ -262,6 +279,7 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
                     ok = await _asyncio.to_thread(
                         refresh_once, agent, cfg.snapshot_dir,
                         sync_fn=_sync, corrections=corrections,
+                        ops_path=cfg.ops_mapping_path,
                     )
                 await message.reply(
                     "🔄 Snapshot rafraîchi et index reconstruit."
