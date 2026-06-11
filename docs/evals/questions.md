@@ -85,3 +85,28 @@ audits publics. Réussir = joindre les deux.
 n'est pas installé (vérifier `_ops/` dans le snapshot) ou pas joint.
 
 **Baseline 2026-06-11 :** ✅ 3/3 (jointure _ops + registre public + audits).
+
+---
+
+## E5 — Fraîcheur temps réel (événements Kestra via Discord)
+
+> @bot-data-ic la climato est à jour ?
+
+L'info n'est PAS dans le snapshot : elle vient du cache d'événements Kestra
+(notifications relayées dans les canaux Discord d'infra, fenêtre 48 h).
+Réussir = `kestra_recent` + jointure avec la règle `quality: freshness`
+du contrat.
+
+**Critères :**
+1. Dernier succès du flow de rafraîchissement cité avec son âge relatif
+2. Verdict rapporté à la règle de fraîcheur du contrat (ex. ≤ 6 min)
+3. `iters` attendu : 3 (kestra_recent → read_file contrat → synthèse)
+
+**Variante incidents :**
+> @bot-data-ic il y a eu des échecs de flows récemment ?
+
+Attendu : les échecs réels du cache cités nommément avec leurs âges ;
+si aucun échec ne matche : nuance d'incertitude (« aucun échec notifié
+≠ garantie » — les notifications peuvent être en panne).
+
+**Baseline 2026-06-11 :** ✅ validée en prod (succès + variante incidents).
