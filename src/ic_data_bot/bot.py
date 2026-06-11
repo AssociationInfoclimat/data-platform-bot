@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -86,6 +87,24 @@ def format_budget_message(budget) -> str:
         f"• Utilisé : {fmt(used)} / {fmt(budget.limit)}\n"
         f"• Restant : {fmt(remaining)}"
     )
+
+
+# Expliqueur d'incident : garde-fous anti-tempête
+INCIDENT_COOLDOWN_S = 3600      # pas deux analyses du même flow en moins d'une heure
+INCIDENT_MIN_SPACING_S = 120    # espacement global entre deux analyses
+
+_FLOW_AFTER_FAILED = re.compile(r"Flow Failed\s*[—–-]*\s*([A-Za-z0-9_.-]+)")
+_FLOW_GENERIC = re.compile(r"\b[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2,}\b")
+
+
+def extract_flow_id(text: str) -> str | None:
+    """Id du flow dans une notification Kestra (« Flow Failed — ns.flow … »)."""
+    t = text or ""
+    m = _FLOW_AFTER_FAILED.search(t)
+    if m and "." in m.group(1):
+        return m.group(1).strip(".")
+    m = _FLOW_GENERIC.search(t)
+    return m.group(0) if m else None
 
 
 def discord_message_text(message) -> str:
@@ -270,6 +289,40 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
         print(f"[kestra] backfill terminé : {kestra_log.count()} événements en cache "
               f"({total} messages lus)", flush=True)
 
+    incident_last_flow: dict[str, float] = {}
+    incident_last_any = [float("-inf")]
+
+    async def _explain_incident(message, flow: str) -> None:
+        question = (
+            f"INCIDENT : le flow Kestra `{flow}` vient d'échouer (FAILED). "
+            "En t'appuyant sur les registres (outil lineage sur ce flow et ses "
+            "outputs, kestra_recent pour voir s'il y a des échecs récurrents) : "
+            "1) ce que fait ce flow (script, fréquence), "
+            "2) l'impact aval CONCRET si ça ne repasse pas — tables non alimentées, "
+            "cartes/services/notifications touchés, en termes métier, "
+            "3) gravité (récurrence ? flow douteux/mort connu ?) et pièges documentés. "
+            "Termine par l'action recommandée en une ligne. Bref et actionnable."
+        )
+        try:
+            reply = await app.process(user_id="system:incident",
+                                      thread_id=f"incident:{message.id}",
+                                      question=question)
+            chunks = split_for_discord(reply)
+            try:
+                target = await message.create_thread(
+                    name=f"🔎 {flow}"[:95], auto_archive_duration=1440)
+            except (discord.Forbidden, discord.HTTPException):
+                target = None
+            if target is None:
+                await message.reply(chunks[0])
+                for c in chunks[1:]:
+                    await message.channel.send(c)
+            else:
+                for c in chunks:
+                    await target.send(c)
+        except Exception as exc:
+            print(f"[incident] analyse impossible pour {flow} : {type(exc).__name__}", flush=True)
+
     @discord_client.event
     async def setup_hook():
         # Conserver des références fortes : sinon le AppRunner (et la tâche de
@@ -289,8 +342,29 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
         # Notifications Kestra (auteur bot, contenu en embed) : capturées pour
         # l'outil kestra_recent, avant tout filtre.
         if ch.id in kestra_channels:
-            kestra_log.record(message.created_at, kestra_channels[ch.id],
-                              discord_message_text(message))
+            text = discord_message_text(message)
+            kestra_log.record(message.created_at, kestra_channels[ch.id], text)
+            # Expliqueur d'incident : sur échec franc dans #alerts (pas WARNING),
+            # analyse d'impact postée en fil sous l'alerte. Garde-fous : cooldown
+            # par flow, espacement global, budget quotidien.
+            if (
+                cfg.incident_explainer
+                and ch.id == cfg.kestra_alerts_channel_id
+                and "FAILED" in text
+            ):
+                flow = extract_flow_id(text)
+                now = time.monotonic()
+                if (
+                    flow
+                    and now - incident_last_flow.get(flow, float("-inf")) >= INCIDENT_COOLDOWN_S
+                    and now - incident_last_any[0] >= INCIDENT_MIN_SPACING_S
+                ):
+                    if not app.budget.has_budget():
+                        print(f"[incident] budget épuisé, analyse sautée : {flow}", flush=True)
+                    else:
+                        incident_last_flow[flow] = now
+                        incident_last_any[0] = now
+                        await _explain_incident(message, flow)
             return
         in_main = ch.id == cfg.allowed_channel_id
         in_thread = isinstance(ch, discord.Thread) and ch.parent_id == cfg.allowed_channel_id

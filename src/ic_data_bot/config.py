@@ -25,6 +25,7 @@ class Config:
     github_issues_repo: str
     kestra_events_channel_id: int
     kestra_alerts_channel_id: int
+    incident_explainer: bool
     history_ttl_seconds: int
     history_max_turns: int
     repo_url: str
@@ -64,6 +65,7 @@ def load_config(env: Mapping[str, str]) -> Config:
         github_issues_repo=env.get("GITHUB_ISSUES_REPO") or "AssociationInfoclimat/data-platform",
         kestra_events_channel_id=_int("KESTRA_EVENTS_CHANNEL_ID", 0),
         kestra_alerts_channel_id=_int("KESTRA_ALERTS_CHANNEL_ID", 0),
+        incident_explainer=(env.get("INCIDENT_EXPLAINER") or "1").lower() not in ("0", "false", "no"),
         history_ttl_seconds=_int("HISTORY_TTL_SECONDS", 1800),
         history_max_turns=_int("HISTORY_MAX_TURNS", 5),
         repo_url=env.get("REPO_URL") or "",

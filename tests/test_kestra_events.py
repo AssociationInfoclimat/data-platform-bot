@@ -68,3 +68,20 @@ def test_toolbox_dispatch(tmp_path):
         assert False, "ToolError attendue"
     except ToolError:
         pass
+
+
+def test_extract_flow_id_real_formats():
+    from ic_data_bot.bot import extract_flow_id
+
+    # formats réels observés dans #alerts
+    assert extract_flow_id(
+        "❌ Flow Failed — infoclimat.site.cache.create_modeles_cache State: **FAILED** Execution: `kzvq`"
+    ) == "infoclimat.site.cache.create_modeles_cache"
+    assert extract_flow_id(
+        "❌ Flow Failed — infoclimat.data.meteoalerte.cache State: **WARNING**"
+    ) == "infoclimat.data.meteoalerte.cache"
+    # fallback générique (sans le préfixe « Flow Failed »)
+    assert extract_flow_id("échec de kestra.system.purge hier") == "kestra.system.purge"
+    # rien d'extractible
+    assert extract_flow_id("panne générale") is None
+    assert extract_flow_id("") is None
