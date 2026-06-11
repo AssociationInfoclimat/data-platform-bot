@@ -25,7 +25,6 @@ esac
 
 last=$(cat "$STATE_FILE" 2>/dev/null || echo "ok")
 [ "$current" = "$last" ] && exit 0
-echo "$current" > "$STATE_FILE"
 
 if [ "$current" = "ok" ]; then
   msg="✅ **ic-data-bot** est rétabli (état : \`$status\`)."
@@ -35,3 +34,7 @@ fi
 
 curl -fsS -m 10 -X POST -H 'Content-Type: application/json' \
   -d "{\"content\": \"$msg\"}" "$WEBHOOK" >/dev/null
+
+# État persisté seulement après envoi réussi : un échec d'envoi (réseau,
+# 400 transitoire du webhook…) sera retenté au prochain passage du cron.
+echo "$current" > "$STATE_FILE"
