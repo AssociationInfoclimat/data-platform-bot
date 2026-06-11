@@ -14,6 +14,7 @@ from .context import build_system_blocks, format_contracts_message
 from .corrections import CorrectionsStore
 from .github_issues import close_issue, contains_internal_details, create_issue, issue_body
 from .guardrails import DailyBudget, RateLimiter, is_allowed_channel
+from .kestra_events import KestraEventLog
 from .tools import ToolBox
 
 RATE_LIMITED_MSG = "Tu as posé trop de questions d'un coup, réessaie dans un instant. 🙏"
@@ -85,6 +86,19 @@ def format_budget_message(budget) -> str:
         f"• Utilisé : {fmt(used)} / {fmt(budget.limit)}\n"
         f"• Restant : {fmt(remaining)}"
     )
+
+
+def discord_message_text(message) -> str:
+    """Contenu textuel d'un message Discord, embeds inclus (les notifications
+    Kestra arrivent avec un content vide et tout dans l'embed)."""
+    parts = [message.content or ""]
+    for e in getattr(message, "embeds", []):
+        for v in (getattr(e, "title", None), getattr(e, "description", None)):
+            if v:
+                parts.append(str(v))
+        for f in getattr(e, "fields", None) or []:
+            parts.append(f"{f.name}: {f.value}")
+    return " | ".join(p for p in parts if p)
 
 
 def install_ops_overlay(snapshot_dir, ops_path) -> bool:
@@ -196,7 +210,17 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
     install_ops_overlay(snapshot, cfg.ops_mapping_path)
     corrections = CorrectionsStore(Path(cfg.corrections_path))
     system_blocks = build_system_blocks(snapshot, corrections)
-    toolbox = ToolBox(snapshot, max_bytes=cfg.tool_read_max_bytes)
+    kestra_log = KestraEventLog()
+    kestra_channels = {
+        cid: label
+        for cid, label in [
+            (cfg.kestra_events_channel_id, "system-events"),
+            (cfg.kestra_alerts_channel_id, "alerts"),
+        ]
+        if cid
+    }
+    toolbox = ToolBox(snapshot, max_bytes=cfg.tool_read_max_bytes,
+                      kestra_log=kestra_log if kestra_channels else None)
 
     import anthropic
     client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
@@ -233,12 +257,27 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
                                      sync_fn=_sync, corrections=corrections,
                                      ops_path=cfg.ops_mapping_path)
 
+    async def _backfill_kestra():
+        total = 0
+        for cid, label in kestra_channels.items():
+            try:
+                channel = discord_client.get_channel(cid) or await discord_client.fetch_channel(cid)
+                async for m in channel.history(limit=200):
+                    kestra_log.record(m.created_at, label, discord_message_text(m))
+                    total += 1
+            except Exception as exc:
+                print(f"[kestra] backfill #{label} impossible : {type(exc).__name__}", flush=True)
+        print(f"[kestra] backfill terminé : {kestra_log.count()} événements en cache "
+              f"({total} messages lus)", flush=True)
+
     @discord_client.event
     async def setup_hook():
         # Conserver des références fortes : sinon le AppRunner (et la tâche de
         # refresh) peuvent être collectés, et l'arrêt propre devient impossible.
         discord_client._health_runner = await _health_server()
         discord_client._refresh_task = _asyncio.create_task(_refresh_loop())
+        if kestra_channels:
+            discord_client._kestra_backfill = _asyncio.create_task(_backfill_kestra())
 
     @discord_client.event
     async def on_ready():
@@ -247,6 +286,12 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
     @discord_client.event
     async def on_message(message: "discord.Message") -> None:
         ch = message.channel
+        # Notifications Kestra (auteur bot, contenu en embed) : capturées pour
+        # l'outil kestra_recent, avant tout filtre.
+        if ch.id in kestra_channels:
+            kestra_log.record(message.created_at, kestra_channels[ch.id],
+                              discord_message_text(message))
+            return
         in_main = ch.id == cfg.allowed_channel_id
         in_thread = isinstance(ch, discord.Thread) and ch.parent_id == cfg.allowed_channel_id
         # Fil ouvert par le bot : on y répond sans exiger une nouvelle mention.

@@ -23,6 +23,8 @@ class Config:
     ops_mapping_path: str
     github_token: str
     github_issues_repo: str
+    kestra_events_channel_id: int
+    kestra_alerts_channel_id: int
     history_ttl_seconds: int
     history_max_turns: int
     repo_url: str
@@ -60,6 +62,8 @@ def load_config(env: Mapping[str, str]) -> Config:
         ops_mapping_path=env.get("OPS_MAPPING_PATH") or "./var/ops-mapping.yaml",
         github_token=env.get("GITHUB_TOKEN") or "",
         github_issues_repo=env.get("GITHUB_ISSUES_REPO") or "AssociationInfoclimat/data-platform",
+        kestra_events_channel_id=_int("KESTRA_EVENTS_CHANNEL_ID", 0),
+        kestra_alerts_channel_id=_int("KESTRA_ALERTS_CHANNEL_ID", 0),
         history_ttl_seconds=_int("HISTORY_TTL_SECONDS", 1800),
         history_max_turns=_int("HISTORY_MAX_TURNS", 5),
         repo_url=env.get("REPO_URL") or "",

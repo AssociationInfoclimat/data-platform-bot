@@ -84,13 +84,36 @@ SCHEMAS = [
             "required": ["name"],
         },
     },
+    {
+        "name": "kestra_recent",
+        "description": (
+            "État TEMPS RÉEL des jobs/pipelines : derniers événements Kestra "
+            "(succès relayés dans #system-events, échecs dans #alerts), fenêtre "
+            "glissante ~48 h. Appelle cet outil dès que la question porte sur le "
+            "présent : « est-ce à jour ? », « ça a tourné ? », « derniers "
+            "échecs ? », fraîcheur d'un dataset, état de la prod data. Le "
+            "snapshot documentaire ne contient PAS cette information — lui seul "
+            "décrit l'attendu, cet outil décrit le réel."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Fragment du nom de flow/dataset à filtrer (ex. 'climato', 'refresh-materialized'). Vide = tous les événements récents.",
+                }
+            },
+            "required": [],
+        },
+    },
 ]
 
 
 class ToolBox:
-    def __init__(self, root: Path, max_bytes: int = 60_000):
+    def __init__(self, root: Path, max_bytes: int = 60_000, kestra_log=None):
         self.root = Path(root).resolve()
         self.max_bytes = max_bytes
+        self.kestra_log = kestra_log
 
     def _safe_path(self, rel: str) -> Path:
         candidate = (self.root / rel).resolve()
@@ -212,4 +235,8 @@ class ToolBox:
             return self.grep(tool_input["pattern"], tool_input.get("glob") or "**/*")
         if name == "lineage":
             return self.lineage(tool_input["name"])
+        if name == "kestra_recent":
+            if self.kestra_log is None:
+                raise ToolError("Événements Kestra non configurés sur ce déploiement.")
+            return self.kestra_log.recent(tool_input.get("query") or "")
         raise ToolError(f"Outil inconnu : {name}")
