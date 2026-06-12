@@ -142,7 +142,8 @@ def refresh_once(agent, snapshot_dir, *, sync_fn, corrections=None, ops_path=Non
             install_ops_overlay(snapshot_dir, ops_path)
         agent.system_blocks = build_system_blocks(Path(snapshot_dir), corrections)
         return True
-    except Exception:
+    except Exception as exc:
+        print(f"[refresh] échec : {type(exc).__name__}: {exc}", flush=True)
         return False
 
 

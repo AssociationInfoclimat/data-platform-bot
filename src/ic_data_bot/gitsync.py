@@ -27,10 +27,11 @@ def build_clone_url(repo_url: str, username: str, token: str) -> str:
 
 def sync(clone_dir, repo_url: str, username: str, token: str, branch: str,
          runner=subprocess.run) -> None:
-    """Clone (partial) si absent, sinon pull --ff-only. Repo public : clone
-    anonyme si aucune créd fournie. Si un token est fourni, il n'est jamais
-    persisté dans .git/config (origin remis sur l'URL propre après clone ;
-    pull avec URL authentifiée inline)."""
+    """Clone (partial) si absent, sinon fetch + reset --hard (le clone est un
+    miroir en lecture seule : cette sémantique survit aux force-push amont,
+    là où pull --ff-only échoue ; les fichiers untracked comme _ops/ sont
+    préservés). Repo public : clone anonyme si aucune créd fournie. Si un
+    token est fourni, il n'est jamais persisté dans .git/config."""
     clone_dir = Path(clone_dir)
     auth_url = build_clone_url(repo_url, username, token) if (username or token) else repo_url
     if not (clone_dir / ".git").is_dir():
@@ -39,7 +40,8 @@ def sync(clone_dir, repo_url: str, username: str, token: str, branch: str,
                 auth_url, str(clone_dir)], check=True)
         runner(["git", "-C", str(clone_dir), "remote", "set-url", "origin", repo_url], check=True)
     else:
-        runner(["git", "-C", str(clone_dir), "pull", "--ff-only", auth_url, branch], check=True)
+        runner(["git", "-C", str(clone_dir), "fetch", auth_url, branch], check=True)
+        runner(["git", "-C", str(clone_dir), "reset", "--hard", "FETCH_HEAD"], check=True)
 
 
 def main() -> int:

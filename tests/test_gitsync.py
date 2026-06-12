@@ -52,8 +52,9 @@ def test_sync_pulls_when_present(tmp_path):
     clone_dir = tmp_path / "repo"
     (clone_dir / ".git").mkdir(parents=True)   # .git present -> pull
     sync(clone_dir, "https://host/x.git", "u", "t", "main", runner=r)
-    assert r.calls[0][:4] == ["git", "-C", str(clone_dir), "pull"]
-    assert "--ff-only" in r.calls[0]
+    assert r.calls[0][:4] == ["git", "-C", str(clone_dir), "fetch"]
+    assert r.calls[1][:5] == ["git", "-C", str(clone_dir), "reset", "--hard"]
+    assert "FETCH_HEAD" in r.calls[1]
     assert "https://u:t@host/x.git" in r.calls[0] and "main" in r.calls[0]
 
 
