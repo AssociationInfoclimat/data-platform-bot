@@ -156,16 +156,27 @@ def build_system_blocks(root: Path, corrections=None) -> list[dict]:
     # résumé dans le préfixe, détail à la demande via read_file.
     contracts_dir = root / "contracts"
     if contracts_dir.is_dir():
-        index = [
-            summarize_contract(fp)
-            for fp in sorted(contracts_dir.glob("*.odcs.yaml"))
-            if not fp.name.startswith("_")
-        ]
+        files = [fp for fp in sorted(contracts_dir.glob("*.odcs.yaml"))
+                 if not fp.name.startswith("_")]
+        index = [summarize_contract(fp) for fp in files]
         if index:
+            drafts = []
+            for fp in files:
+                try:
+                    st = (yaml.safe_load(fp.read_text(encoding="utf-8", errors="replace")) or {}).get("status")
+                except yaml.YAMLError:
+                    st = None
+                if st == "draft":
+                    drafts.append(fp.name)
+            # Compte exact + liste des drafts en tête (le modèle estimait au lieu
+            # de compter → réponses fausses sur « combien de contrats / lesquels en draft »).
+            draft_txt = (f", dont {len(drafts)} en draft : {', '.join(drafts)}"
+                         if drafts else ", aucun en draft")
             parts.append(
-                "### Index des contrats ODCS — pour les détails d'un contrat "
-                "(usage, limitations, pièges, types, descriptions de colonnes), "
-                "TOUJOURS lire le fichier complet via read_file avant de répondre.\n\n"
+                f"### Index des contrats ODCS — {len(index)} contrats au total{draft_txt}. "
+                "Pour les détails d'un contrat (usage, limitations, pièges, types, "
+                "descriptions de colonnes), TOUJOURS lire le fichier complet via read_file "
+                "avant de répondre.\n\n"
                 + "\n\n".join(index)
             )
 
