@@ -181,6 +181,7 @@ class ToolBox:
                 continue
             hits: list[str] = []
             skipped = 0
+            status_digest: list[str] = []  # tables non-actives, non plafonné (cf. ci-dessous)
             for coll in collections:
                 for entry in coll:
                     if isinstance(entry, dict):
@@ -190,6 +191,22 @@ class ToolBox:
                     else:
                         continue
                     if needle in dump.lower():
+                        # Le statut/usage RÉEL d'une table (mort/douteux + notes legacy)
+                        # vit dans inventory/tables.yaml. Le plafond de MAX_LINEAGE_
+                        # ENTRIES_PER_FILE droppait ces entrées quand le nom matchait
+                        # beaucoup de tables (ex. « forums » → 11 tables, les ibf_*
+                        # `status: mort` tombaient hors des 6 premières). On émet donc
+                        # un digest des statuts NON-actifs, hors plafond, pour qu'ils
+                        # soient toujours visibles.
+                        if rel == "inventory/tables.yaml" and isinstance(entry, dict):
+                            st = str(entry.get("status", "?"))
+                            if st.lower() != "actif":
+                                nm = str(entry.get("name", "?"))
+                                note = " ".join(str(entry.get("notes") or "").split())
+                                line = f"- `{nm}` → status: **{st}**"
+                                if note:
+                                    line += f" — {note[:220]}"
+                                status_digest.append(line)
                         if len(hits) < MAX_LINEAGE_ENTRIES_PER_FILE:
                             hits.append(dump.strip()[:MAX_LINEAGE_ENTRY_CHARS])
                         else:
@@ -198,6 +215,16 @@ class ToolBox:
                 block = f"### {rel} ({len(hits) + skipped} entrée(s))\n" + "\n---\n".join(hits)
                 if skipped:
                     block += f"\n[… {skipped} autre(s) entrée(s) — affine avec grep]"
+                if status_digest:
+                    block = (
+                        "### ⚠️ STATUTS TABLE non-actifs (inventory/tables.yaml) — "
+                        "FONT AUTORITÉ pour juger si une table est morte/douteuse/utilisée, "
+                        "AVANT tout statut de contrat (un contrat `draft` ne rend pas une "
+                        "table morte « active ») :\n"
+                        + "\n".join(status_digest[:20])
+                        + "\n\n"
+                        + block
+                    )
                 sections.append(block)
                 total += len(block)
                 if total > MAX_LINEAGE_TOTAL_CHARS:
@@ -214,11 +241,13 @@ class ToolBox:
             if mentioned:
                 sections.append(
                     "### ⚠️ Contrats concernés — ÉTAPE OBLIGATOIRE avant de répondre :\n"
-                    "lis ces contrats via read_file. Leurs sections usage/limitations "
-                    "documentent souvent des doutes (flux morts, writers présumés, "
-                    "rétention) qui CONTREDISENT le statut indiqué dans les registres "
-                    "ci-dessus. Ne déclare jamais un writer/reader « actif » sans avoir "
-                    "vérifié les limitations du contrat.\n"
+                    "lis ces contrats via read_file pour la nuance usage/limitations "
+                    "(rétention, writers présumés, pièges). NB : le statut de contrat "
+                    "(`draft`/`active`) renseigne la contractualisation, PAS si la table "
+                    "est vivante — pour ça, le `status` TABLE de inventory/tables.yaml "
+                    "ci-dessus fait foi (mort/douteux prime). Ne déclare jamais un "
+                    "writer/reader « actif » sans avoir vérifié l'inventaire ET les "
+                    "limitations du contrat.\n"
                     + "\n".join(mentioned)
                 )
         if not sections:
