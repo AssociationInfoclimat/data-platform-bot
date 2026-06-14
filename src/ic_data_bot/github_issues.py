@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import urllib.request
 
@@ -8,10 +9,24 @@ API = "https://api.github.com"
 
 # Le repo d'issues est PUBLIC : on n'y publie jamais de détails d'infra interne.
 # Un !fix qui en contient reste un erratum local (volume privé), sans issue.
-INTERNAL_PATTERNS = re.compile(
-    r"192\.168\.\d|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|\.home\.ponf|chom\.ovh|vcs\.infoclimat",
-    re.IGNORECASE,
-)
+#
+# Ce module vit dans un repo PUBLIC : seuls des motifs non sensibles sont en dur
+# (plages RFC1918 génériques + domaine public chom.ovh). Les domaines internes
+# privés viennent de EXTRA_REDACT_PATTERNS (CSV) dans le .env de la VM — jamais
+# commités.
+_BASE_PATTERNS = (r"192\.168\.\d", r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}", r"chom\.ovh")
+
+
+def _build_internal_re(extra: tuple[str, ...] = ()) -> re.Pattern:
+    alts = "|".join((*_BASE_PATTERNS, *(re.escape(d) for d in extra)))
+    return re.compile(alts, re.IGNORECASE)
+
+
+def _extra_patterns() -> tuple[str, ...]:
+    return tuple(p.strip() for p in os.environ.get("EXTRA_REDACT_PATTERNS", "").split(",") if p.strip())
+
+
+INTERNAL_PATTERNS = _build_internal_re(_extra_patterns())
 
 
 def contains_internal_details(text: str) -> bool:

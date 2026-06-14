@@ -1,14 +1,24 @@
-from ic_data_bot.github_issues import contains_internal_details, issue_body
+from ic_data_bot.github_issues import (
+    contains_internal_details,
+    issue_body,
+    _build_internal_re,
+)
 
 
 def test_internal_details_detection():
-    assert contains_internal_details("la base est sur 192.168.0.106")
-    assert contains_internal_details("le vrai host est 10.0.20.3")
-    assert contains_internal_details("voir vcs.infoclimat.net")
+    # Plages RFC1918 génériques + domaine public chom.ovh (en dur dans le code).
+    assert contains_internal_details("la base est sur 192.168.0.5")
+    assert contains_internal_details("le vrai host est 10.0.0.9")
     assert contains_internal_details("domaine Chom.OVH")
     assert not contains_internal_details("la colonne toto est de type B")
     assert not contains_internal_details("le job tourne sur ct-timescale")  # hostname public
     assert not contains_internal_details("")
+
+
+def test_internal_details_extra_configurable():
+    # Domaines internes privés fournis hors-code (EXTRA_REDACT_PATTERNS) : mécanisme.
+    rx = _build_internal_re(("internal.example.invalid",))
+    assert rx.search("voir git.internal.example.invalid")
 
 
 def test_issue_body_structure():

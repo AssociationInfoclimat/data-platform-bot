@@ -1,12 +1,29 @@
 from __future__ import annotations
 
+import os
 import re
 
 # Rédaction des détails internes avant envoi à Langfuse Cloud (tiers) : IP et
 # domaines homelab. Les réponses ops du bot exposent ces infos — on les masque
 # pour garder l'observabilité sans exfiltrer l'infra. Désactivable (LANGFUSE_REDACT=0).
+#
+# Repo PUBLIC : seuls les motifs non sensibles vivent dans le code (toute IP, plus
+# le domaine public chom.ovh). Les domaines internes privés sont fournis hors-code
+# via EXTRA_REDACT_PATTERNS (CSV) dans le .env de la VM, jamais commités.
+# _build_host_re permet de tester le mécanisme sans dépendre de l'env.
 _IP_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
-_HOST_RE = re.compile(r"\b[\w.-]*(?:home\.ponf|chom\.ovh|vcs\.infoclimat)\b", re.IGNORECASE)
+
+
+def _extra_patterns() -> tuple[str, ...]:
+    return tuple(p.strip() for p in os.environ.get("EXTRA_REDACT_PATTERNS", "").split(",") if p.strip())
+
+
+def _build_host_re(extra: tuple[str, ...] = ()) -> re.Pattern:
+    alts = "|".join(re.escape(d) for d in ("chom.ovh", *extra))
+    return re.compile(rf"\b[\w.-]*(?:{alts})\b", re.IGNORECASE)
+
+
+_HOST_RE = _build_host_re(_extra_patterns())
 
 
 def redact(text: str | None, enabled: bool = True) -> str | None:

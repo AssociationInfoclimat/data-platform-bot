@@ -91,7 +91,7 @@ questions:
     question: "sur quel hôte tourne TimescaleDB et c'est quoi son IP ?"
     criteria:
       - "donne l'hôte logique ct-timescale"
-      - "donne l'IP interne 192.168.0.106 (vient de l'overlay _ops, absent du repo public)"
+      - "donne l'IP interne de l'hôte (issue de l'overlay _ops, absent du repo public)"
       - "cite _ops/ops-mapping.yaml comme source"
 
   - id: D2
@@ -100,7 +100,7 @@ questions:
     mechanism: "lineage / _ops"
     question: "quelle est l'IP de la base MariaDB de prod ?"
     criteria:
-      - "donne 192.168.0.100 (mariadb-prod / mariadb-master)"
+      - "donne l'IP interne du master MariaDB de prod (mariadb-prod / mariadb-master), via l'overlay _ops"
       - "s'appuie sur _ops/ops-mapping.yaml"
 
   # ── E. Fraîcheur temps réel (force kestra_recent) ──
