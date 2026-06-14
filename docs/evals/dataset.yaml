@@ -43,7 +43,7 @@ questions:
     criteria:
       - "indique 21 contrats (tolérance ±1)"
       - "liste les 4 contrats draft : forums2-ipboard, modeles-nwp-fichiers, previsions-api-opendata, satellite-tuiles-fichiers"
-      - "ne produit pas de tableau Markdown (listes à puces)"
+      - "n'utilise pas de tableau Markdown à pipes (lignes « | … | ») — les en-têtes, listes à puces ou numérotées sont OK"
 
   - id: B2
     category: index
