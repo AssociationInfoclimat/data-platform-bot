@@ -201,7 +201,7 @@ def test_refresh_once_reinstalls_overlay(tmp_path):
     assert (tmp_path / "_ops" / "ops-mapping.yaml").is_file()
     # le résumé des registres mentionne l'overlay
     joined = "\n".join(b["text"] for b in agent.system_blocks)
-    assert "_ops/ops-mapping.yaml" in joined and "INTERNE" in joined
+    assert "_ops/ops-mapping.yaml" in joined and "DISPONIBLE" in joined
 
 
 def test_provider_nick():

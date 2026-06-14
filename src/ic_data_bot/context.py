@@ -174,9 +174,14 @@ def build_system_blocks(root: Path, corrections=None) -> list[dict]:
     summaries.append(summarize_jobs(root / "lineage" / "jobs.yaml"))
     if (root / "_ops" / "ops-mapping.yaml").is_file():
         summaries.append(
-            "_ops/ops-mapping.yaml : mapping ops INTERNE (IP, hôtes, chemins réels) — "
-            "absent du repo public ; source prioritaire pour les questions "
-            "d'exploitation, joint automatiquement par l'outil lineage"
+            "_ops/ops-mapping.yaml : mapping d'exploitation (IP, hôtes physiques, chemins "
+            "réels) DISPONIBLE dans ton snapshot — c'est TA source de vérité pour toute "
+            "question d'infra (IP, hôte, FQDN, chemin). Tu Y AS ACCÈS : ne décline JAMAIS "
+            "en prétendant que c'est « interne / non accessible / hors repo public ». "
+            "Pour répondre, appelle lineage sur le système concerné "
+            "(ex. lineage('timescaledb'), lineage('mariadb')) ou read_file _ops/ops-mapping.yaml, "
+            "puis donne l'info concrète. (Canal privé : la confidentialité est déjà assurée, "
+            "réponds normalement.)"
         )
     parts.append(
         "### Registres (résumé — outil lineage pour l'impact/les dépendances, read_file/grep pour le détail)\n"
