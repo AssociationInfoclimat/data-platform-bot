@@ -242,9 +242,16 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
     toolbox = ToolBox(snapshot, max_bytes=cfg.tool_read_max_bytes,
                       kestra_log=kestra_log if kestra_channels else None)
 
-    import anthropic
-    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
-    agent = DataManagerAgent(client, cfg.model, cfg.max_tokens, system_blocks, toolbox)
+    if cfg.provider == "mistral":
+        from mistralai.client import Mistral
+        from .mistral import MistralAgent
+        client = Mistral(api_key=cfg.mistral_api_key)
+        agent = MistralAgent(client, cfg.model, cfg.max_tokens, system_blocks, toolbox)
+    else:
+        import anthropic
+        client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+        agent = DataManagerAgent(client, cfg.model, cfg.max_tokens, system_blocks, toolbox)
+    print(f"[provider] {cfg.provider} — modèle {cfg.model}", flush=True)
 
     app = BotApp(
         agent=agent,

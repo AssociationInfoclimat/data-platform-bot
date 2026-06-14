@@ -24,6 +24,16 @@ Resync du contexte quand la branche `feat/data-platform-bootstrap` évolue : `ma
 - In-bot : canal unique, rate-limit/utilisateur, budget quotidien de tokens, `max_tokens` borné,
   lectures d'outil plafonnées.
 
+## Fournisseur LLM
+
+Deux fournisseurs via `PROVIDER` dans le `.env` :
+- `anthropic` (défaut) — `ANTHROPIC_API_KEY` + `MODEL=claude-haiku-4-5` ;
+- `mistral` — `MISTRAL_API_KEY` + `MODEL=mistral-small-latest`.
+
+L'adaptateur vit dans `src/ic_data_bot/{claude,mistral}.py` (même interface) ; le reste
+du bot est commun. Note : Mistral n'a pas de prompt caching, le préfixe system est
+refacturé à chaque message — `DAILY_TOKEN_BUDGET` se vide plus vite qu'avec Haiku+cache.
+
 ## Déploiement
 
 Docker compose sur n'importe quel hôte (prérequis et mise en service :

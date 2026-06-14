@@ -3,13 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-REQUIRED = ("DISCORD_BOT_TOKEN", "ANTHROPIC_API_KEY", "ALLOWED_CHANNEL_ID")
+REQUIRED = ("DISCORD_BOT_TOKEN", "ALLOWED_CHANNEL_ID")  # + la clé du provider actif
 
 
 @dataclass(frozen=True)
 class Config:
     discord_bot_token: str
+    provider: str
     anthropic_api_key: str
+    mistral_api_key: str
     allowed_channel_id: int
     snapshot_dir: str
     model: str
@@ -39,7 +41,9 @@ class Config:
 
 
 def load_config(env: Mapping[str, str]) -> Config:
-    missing = [k for k in REQUIRED if not env.get(k)]
+    provider = (env.get("PROVIDER") or "anthropic").lower()
+    provider_key = "ANTHROPIC_API_KEY" if provider == "anthropic" else "MISTRAL_API_KEY"
+    missing = [k for k in (*REQUIRED, provider_key) if not env.get(k)]
     if missing:
         raise ValueError(f"Variables d'environnement manquantes : {', '.join(missing)}")
 
@@ -49,7 +53,9 @@ def load_config(env: Mapping[str, str]) -> Config:
 
     return Config(
         discord_bot_token=env["DISCORD_BOT_TOKEN"],
-        anthropic_api_key=env["ANTHROPIC_API_KEY"],
+        provider=provider,
+        anthropic_api_key=env.get("ANTHROPIC_API_KEY") or "",
+        mistral_api_key=env.get("MISTRAL_API_KEY") or "",
         allowed_channel_id=int(env["ALLOWED_CHANNEL_ID"]),
         snapshot_dir=env.get("DATAPLATFORM_SNAPSHOT_DIR") or "./snapshot",
         model=env.get("MODEL") or "claude-sonnet-4-6",

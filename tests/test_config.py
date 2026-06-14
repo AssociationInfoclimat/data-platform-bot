@@ -46,3 +46,22 @@ def test_load_config_deploy_overrides():
     assert cfg.refresh_interval_seconds == 600
     assert cfg.repo_url == "https://git/x.git"
     assert cfg.gitlab_deploy_token == "tok"
+
+
+def test_provider_defaults_anthropic():
+    cfg = load_config(BASE)
+    assert cfg.provider == "anthropic"
+    assert cfg.anthropic_api_key == "key"
+    assert cfg.mistral_api_key == ""
+
+
+def test_provider_mistral_requires_mistral_key():
+    env = {"DISCORD_BOT_TOKEN": "tok", "ALLOWED_CHANNEL_ID": "1", "PROVIDER": "mistral"}
+    with pytest.raises(ValueError) as e:
+        load_config(env)
+    assert "MISTRAL_API_KEY" in str(e.value)
+    # anthropic key n'est PAS requise quand provider=mistral
+    cfg = load_config({**env, "MISTRAL_API_KEY": "mk", "MODEL": "mistral-small-latest"})
+    assert cfg.provider == "mistral"
+    assert cfg.mistral_api_key == "mk"
+    assert cfg.model == "mistral-small-latest"
