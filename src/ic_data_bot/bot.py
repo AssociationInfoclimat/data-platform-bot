@@ -198,7 +198,8 @@ class BotApp:
         record.update(fields)
         print(json.dumps(record, ensure_ascii=False), flush=True)
 
-    async def process(self, *, user_id: str, thread_id: str, question: str) -> str:
+    async def process(self, *, user_id: str, thread_id: str, question: str, agent=None) -> str:
+        agent = agent or self.agent
         t0 = time.monotonic()
         if not self.rate_limiter.allow(user_id):
             self._log(user=user_id, status="rate_limited", q_chars=len(question))
@@ -208,14 +209,16 @@ class BotApp:
             return NO_BUDGET_MSG
         history = self.history.get(thread_id)
         try:
-            result = await asyncio.to_thread(self.agent.answer, question, history)
+            result = await asyncio.to_thread(agent.answer, question, history)
         except Exception as exc:  # ne jamais crasher le bot sur une erreur d'API/outil
             self._log(user=user_id, status="error", q_chars=len(question),
+                      model=getattr(agent, "model", "?"),
                       dur_s=round(time.monotonic() - t0, 2), error=type(exc).__name__)
             return ERROR_MSG
         self.budget.add(result.tokens)
         self.history.append(thread_id, question, result.text)
         self._log(user=user_id, status="ok", q_chars=len(question),
+                  model=getattr(agent, "model", "?"),
                   dur_s=round(time.monotonic() - t0, 2), tokens=result.tokens,
                   iters=result.iterations, reply_chars=len(result.text),
                   budget_left=self.budget.remaining())
@@ -256,11 +259,18 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
         from .mistral import MistralAgent
         client = Mistral(api_key=cfg.mistral_api_key)
         agent = MistralAgent(client, cfg.model, cfg.max_tokens, system_blocks, toolbox)
+        # Agent de raisonnement (Magistral) — ciblé : !deep et expliqueur
+        # d'incident. Même client/outils/préfixe ; modèle distinct.
+        reasoning_agent = MistralAgent(client, cfg.mistral_reasoning_model,
+                                       cfg.max_tokens, system_blocks, toolbox)
     else:
         import anthropic
         client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
         agent = DataManagerAgent(client, cfg.model, cfg.max_tokens, system_blocks, toolbox)
-    print(f"[provider] {cfg.provider} — modèle {cfg.model}", flush=True)
+        reasoning_agent = agent  # pas de modèle de raisonnement distinct côté Anthropic
+    reasoning_label = getattr(reasoning_agent, "model", "?")
+    print(f"[provider] {cfg.provider} — modèle {cfg.model} "
+          f"(raisonnement : {reasoning_label})", flush=True)
 
     app = BotApp(
         agent=agent,
@@ -286,12 +296,19 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
         await site.start()
         return runner
 
+    def _sync_reasoning():
+        # L'agent de raisonnement partage le préfixe system : le re-synchroniser
+        # après chaque reconstruction (refresh).
+        if reasoning_agent is not agent:
+            reasoning_agent.system_blocks = agent.system_blocks
+
     async def _refresh_loop():
         while True:
             await _asyncio.sleep(cfg.refresh_interval_seconds)
             await _asyncio.to_thread(refresh_once, agent, cfg.snapshot_dir,
                                      sync_fn=_sync, corrections=corrections,
                                      ops_path=cfg.ops_mapping_path)
+            _sync_reasoning()
 
     async def _backfill_kestra():
         total = 0
@@ -324,9 +341,10 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
             "libellés et du `code` pour les noms techniques. Max 1500 caractères."
         )
         try:
+            # Analyse d'impact = raisonnement profond → agent Magistral.
             reply = await app.process(user_id="system:incident",
                                       thread_id=f"incident:{message.id}",
-                                      question=question)
+                                      question=question, agent=reasoning_agent)
             chunks = split_for_discord(reply)
             try:
                 target = await message.create_thread(
@@ -452,6 +470,7 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
                         sync_fn=_sync, corrections=corrections,
                         ops_path=cfg.ops_mapping_path,
                     )
+                    _sync_reasoning()
                 await message.reply(
                     "🔄 Snapshot rafraîchi et index reconstruit."
                     if ok
@@ -499,6 +518,7 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
                             issue_note = "\n⚠️ Création de l'issue GitHub échouée (erratum enregistré quand même)."
                 n = corrections.add(author, text, ref, issue=issue_no)
                 agent.system_blocks = build_system_blocks(Path(cfg.snapshot_dir), corrections)
+                _sync_reasoning()
                 await message.reply(
                     f"✅ Erratum **#{n}** enregistré — pris en compte dès la prochaine question."
                     f"{issue_note}\n"
@@ -522,6 +542,7 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
                 removed = corrections.remove(int(arg)) if arg.isdigit() else None
                 if removed is not None:
                     agent.system_blocks = build_system_blocks(Path(cfg.snapshot_dir), corrections)
+                    _sync_reasoning()
                     note = ""
                     if removed.get("issue") and cfg.github_token:
                         try:
@@ -566,6 +587,20 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
             content = content.replace(f"<@&{rid}>", "")
         question = content.strip()
 
+        # `!deep <question>` → route vers l'agent de raisonnement (Magistral),
+        # plus lent/cher mais meilleur sur l'impact/lineage complexe. Sinon agent rapide.
+        use_agent = agent
+        if question.lower().startswith("!deep"):
+            question = question[len("!deep"):].strip()
+            use_agent = reasoning_agent
+            if not question:
+                await message.reply(
+                    f"Usage : `!deep <question>` — analyse approfondie via "
+                    f"`{reasoning_label}` (raisonnement). Pour les questions simples, "
+                    "mentionne-moi normalement."
+                )
+                return
+
         # Question dans le canal principal → ouvrir un fil dédié : l'historique
         # de conversation est isolé par fil (sinon tous les devs partagent le
         # même contexte de 5 tours). Fallback canal si permission manquante.
@@ -588,7 +623,8 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
 
         thread_id = str(target.id)
         async with target.typing():
-            reply = await app.process(user_id=str(message.author.id), thread_id=thread_id, question=question)
+            reply = await app.process(user_id=str(message.author.id), thread_id=thread_id,
+                                      question=question, agent=use_agent)
         chunks = split_for_discord(reply)
         if target is ch:
             await message.reply(chunks[0])

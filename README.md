@@ -31,7 +31,9 @@ Deux fournisseurs via `PROVIDER` dans le `.env` :
 - `mistral` — `MISTRAL_API_KEY` + `MODEL=mistral-small-latest`.
 
 L'adaptateur vit dans `src/ic_data_bot/{claude,mistral}.py` (même interface) ; le reste
-du bot est commun. Note : Mistral n'a pas de prompt caching, le préfixe system est
+du bot est commun.
+
+**Raisonnement ciblé (Mistral)** : `MISTRAL_REASONING_MODEL` (défaut `magistral-small-latest`) est utilisé par la commande `!deep <question>` (analyse approfondie à la demande) et par l'expliqueur d'incident. Magistral raisonne nativement — 5× le prix de small mais bien meilleur sur l'impact/lineage complexe ; réservé donc à ces deux usages, le Q&R normal restant sur le modèle rapide. Note : Mistral n'a pas de prompt caching, le préfixe system est
 refacturé à chaque message — `DAILY_TOKEN_BUDGET` se vide plus vite qu'avec Haiku+cache.
 
 ## Déploiement

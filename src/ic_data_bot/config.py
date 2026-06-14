@@ -12,6 +12,7 @@ class Config:
     provider: str
     anthropic_api_key: str
     mistral_api_key: str
+    mistral_reasoning_model: str
     allowed_channel_id: int
     snapshot_dir: str
     model: str
@@ -56,6 +57,7 @@ def load_config(env: Mapping[str, str]) -> Config:
         provider=provider,
         anthropic_api_key=env.get("ANTHROPIC_API_KEY") or "",
         mistral_api_key=env.get("MISTRAL_API_KEY") or "",
+        mistral_reasoning_model=env.get("MISTRAL_REASONING_MODEL") or "magistral-small-latest",
         allowed_channel_id=int(env["ALLOWED_CHANNEL_ID"]),
         snapshot_dir=env.get("DATAPLATFORM_SNAPSHOT_DIR") or "./snapshot",
         model=env.get("MODEL") or "claude-sonnet-4-6",

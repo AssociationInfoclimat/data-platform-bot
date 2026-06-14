@@ -65,3 +65,10 @@ def test_provider_mistral_requires_mistral_key():
     assert cfg.provider == "mistral"
     assert cfg.mistral_api_key == "mk"
     assert cfg.model == "mistral-small-latest"
+
+
+def test_mistral_reasoning_model_default_and_override():
+    cfg = load_config(BASE)
+    assert cfg.mistral_reasoning_model == "magistral-small-latest"
+    cfg2 = load_config({**BASE, "MISTRAL_REASONING_MODEL": "magistral-medium-latest"})
+    assert cfg2.mistral_reasoning_model == "magistral-medium-latest"

@@ -212,3 +212,21 @@ def test_provider_nick():
     assert provider_nick("bot", "xyz") == "bot · xyz"
     # tronqué à 32 caractères (limite Discord)
     assert len(provider_nick("x" * 40, "mistral")) == 32
+
+
+@pytest.mark.asyncio
+async def test_process_agent_override_and_logs_model():
+    # un agent "raisonnement" distinct est bien utilisé quand on le passe
+    class _Reasoner:
+        model = "magistral-small-latest"
+        def __init__(self): self.called = False
+        def answer(self, q, h):
+            self.called = True
+            from ic_data_bot.claude import AnswerResult
+            return AnswerResult(text="analyse profonde", tokens=99, iterations=3)
+    reasoner = _Reasoner()
+    app = BotApp(agent=_Agent(), rate_limiter=_RL(), budget=_Budget(),
+                 history=ThreadHistory(2, 1000, clock=lambda: 0.0))
+    reply = await app.process(user_id="u", thread_id="t", question="q", agent=reasoner)
+    assert reply == "analyse profonde"
+    assert reasoner.called is True            # routé vers l'agent fourni
