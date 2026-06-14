@@ -4,6 +4,24 @@ Questions calibrées à poser dans Discord après tout changement de modèle, de
 prompt, d'outil ou d'index. Vérifier la mécanique dans les logs
 (`docker compose logs | grep '"evt"'` → champ `iters`) en plus du contenu.
 
+## Lancer les évals hors Discord
+
+`scripts/run_eval.py` exécute ces questions directement contre l'agent, sans
+passer par Discord (reproductible, mesuré : iters/tokens/durée). Il construit un
+agent par provider dont la clé est dans le `.env` → **comparaison Mistral vs Haiku
+automatique** si les deux clés sont présentes. Backfill Kestra inclus (pour E5).
+
+```bash
+# dans le conteneur (snapshot + deps + .env y vivent)
+docker compose exec bot uv run python scripts/run_eval.py          # toutes les évals
+docker compose exec bot uv run python scripts/run_eval.py E1 E3    # évals choisies
+docker compose exec bot uv run python scripts/run_eval.py -q "question libre"
+```
+
+Modèles : le provider actif (`PROVIDER`) utilise `MODEL` ; l'autre, s'il a une
+clé, utilise `ANTHROPIC_MODEL` / `MISTRAL_MODEL` (défauts claude-haiku-4-5 /
+mistral-small-latest).
+
 ---
 
 ## E1 — Récupération profonde (piège absent de l'index)
