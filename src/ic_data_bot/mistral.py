@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 
-from .claude import ISSUE_TITLE_PROMPT, MAX_TOOL_ITERATIONS, TITLE_PROMPT, AnswerResult
+from .claude import ISSUE_TITLE_PROMPT, MAX_TOOL_ITERATIONS, TITLE_PROMPT, AnswerResult, _tool_trace
 from .tools import SCHEMAS, ToolError
 
 # Les modèles de raisonnement (Magistral) peuvent émettre leur réflexion dans
@@ -99,6 +99,7 @@ class MistralAgent:
         messages += list(history)
         messages.append({"role": "user", "content": question})
         total = 0
+        tools_used: list[str] = []
 
         for iteration in range(1, MAX_TOOL_ITERATIONS + 1):
             resp = self.client.chat.complete(
@@ -115,7 +116,7 @@ class MistralAgent:
             if choice.finish_reason != "tool_calls" or not msg.tool_calls:
                 text = _text_of(msg.content)
                 return AnswerResult(text=text.strip() or "(réponse vide)", tokens=total,
-                                    iterations=iteration)
+                                    iterations=iteration, tools=tools_used)
 
             # Ré-émettre le message assistant (contenu + appels d'outils).
             messages.append({
@@ -133,10 +134,12 @@ class MistralAgent:
             for tc in msg.tool_calls:
                 try:
                     args = json.loads(tc.function.arguments or "{}")
+                    tools_used.append(_tool_trace(tc.function.name, args))
                     out = self.toolbox.dispatch(tc.function.name, args)
                 except ToolError as exc:
                     out = str(exc)
                 except json.JSONDecodeError:
+                    tools_used.append(f"{tc.function.name}(<json invalide>)")
                     out = "Arguments d'outil JSON invalides."
                 messages.append({
                     "role": "tool",

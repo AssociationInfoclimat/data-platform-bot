@@ -277,6 +277,7 @@ def main(argv: list[str]) -> int:
                     r = agent.answer(q["question"], history=[])
                     dur = time.monotonic() - t0
                     head = f"\n--- {name}  (iters={r.iterations}, tokens={r.tokens}, {dur:.1f}s"
+                    tool_line = "   ⚙ outils: " + (" → ".join(r.tools) if r.tools else "AUCUN")
                     if gen is not None:
                         gen.update(output=redact(r.text, redact_on),
                                    usage_details={"total": r.tokens},
@@ -291,10 +292,12 @@ def main(argv: list[str]) -> int:
                         if gen is not None and total:
                             gen.score_trace(name="eval", value=round(met / total, 3), comment=note[:300])
                         print(head + ") ---")
+                        print(tool_line)
                         print(r.text[:500] if grade else r.text)
                         print(f"   ⮑ juge: {note}")
                     else:
                         print(head + ") ---")
+                        print(tool_line)
                         print(r.text)
             except Exception as exc:
                 print(f"\n--- {name} : ERREUR {type(exc).__name__}: {exc} ---")

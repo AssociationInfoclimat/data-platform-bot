@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .tools import SCHEMAS, ToolError
 
@@ -12,6 +12,21 @@ class AnswerResult:
     text: str
     tokens: int
     iterations: int = 1
+    tools: list[str] = field(default_factory=list)
+
+
+def _tool_trace(name: str, args) -> str:
+    """Trace courte 'outil(arg)' pour l'observabilité d'éval (1er arg utile)."""
+    val = ""
+    if isinstance(args, dict):
+        for k in ("path", "name", "query", "pattern"):
+            if args.get(k):
+                val = str(args[k])
+                break
+        else:
+            val = next((str(v) for v in args.values() if v), "")
+    val = " ".join(val.split())
+    return f"{name}({val[:60]})" if val else name
 
 
 def _count(usage) -> int:
@@ -64,6 +79,7 @@ class DataManagerAgent:
     def answer(self, question: str, history: list[dict]) -> AnswerResult:
         messages: list[dict] = list(history) + [{"role": "user", "content": question}]
         total = 0
+        tools_used: list[str] = []
 
         # `thinking` adaptatif et `output_config.effort` ne sont supportés que
         # par les modèles 4.6+ (Opus 4.6/4.7/4.8, Sonnet 4.6, Fable). Haiku 4.5
@@ -87,13 +103,14 @@ class DataManagerAgent:
             if resp.stop_reason != "tool_use":
                 text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
                 return AnswerResult(text=text.strip() or "(réponse vide)", tokens=total,
-                                    iterations=iteration)
+                                    iterations=iteration, tools=tools_used)
 
             messages.append({"role": "assistant", "content": resp.content})
             results = []
             for block in resp.content:
                 if getattr(block, "type", "") != "tool_use":
                     continue
+                tools_used.append(_tool_trace(block.name, block.input))
                 try:
                     out = self.toolbox.dispatch(block.name, block.input)
                     is_error = False
@@ -111,4 +128,5 @@ class DataManagerAgent:
             text="Désolé, je n'ai pas réussi à aboutir (trop d'allers-retours d'outils).",
             tokens=total,
             iterations=MAX_TOOL_ITERATIONS,
+            tools=tools_used,
         )
