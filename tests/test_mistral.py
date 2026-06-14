@@ -142,3 +142,15 @@ def test_prompt_cache_key_stable_and_passed():
     kw = client.chat.kwargs[0]
     # la clé envoyée = hash du préfixe system aplati
     assert kw["prompt_cache_key"] == _cache_key("persona\n\nnoyau")
+
+
+def test_think_tags_stripped():
+    from ic_data_bot.mistral import _text_of
+    # raisonnement en clair retiré, réponse conservée
+    assert _text_of("<think>je réfléchis...</think>\nRéponse finale") == "Réponse finale"
+    assert _text_of("<THINK>x\ny</THINK> ok") == "ok"
+    # ThinkChunk (attribut thinking) ignoré, TextChunk gardé
+    from types import SimpleNamespace
+    chunks = [SimpleNamespace(type="thinking", thinking="caché"),
+              SimpleNamespace(type="text", text="visible")]
+    assert _text_of(chunks) == "visible"

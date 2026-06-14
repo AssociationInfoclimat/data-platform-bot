@@ -79,10 +79,12 @@ def backfill_kestra(cfg, log: KestraEventLog) -> None:
             log.record(ts, label, text)
 
 
-def build_agents(cfg, system_blocks, toolbox) -> dict:
-    """Un agent par provider dont la clé est présente."""
+def build_agents(cfg, system_blocks, toolbox, mistral_models=None) -> dict:
+    """Un agent par provider dont la clé est présente. `mistral_models` (liste)
+    permet d'A/B plusieurs modèles Mistral (ex. mistral-small vs magistral-small)."""
     agents = {}
-    if cfg.anthropic_api_key:
+    # En A/B Mistral focalisé (--mistral-models), on n'ajoute pas Haiku.
+    if cfg.anthropic_api_key and not mistral_models:
         import anthropic
         from ic_data_bot.claude import DataManagerAgent
         model = cfg.model if cfg.provider == "anthropic" else \
@@ -93,11 +95,13 @@ def build_agents(cfg, system_blocks, toolbox) -> dict:
     if cfg.mistral_api_key:
         from mistralai.client import Mistral
         from ic_data_bot.mistral import MistralAgent
-        model = cfg.model if cfg.provider == "mistral" else \
-            os.environ.get("MISTRAL_MODEL") or DEFAULT_MODEL["mistral"]
-        agents[f"mistral:{model}"] = MistralAgent(
-            Mistral(api_key=cfg.mistral_api_key), model,
-            cfg.max_tokens, system_blocks, toolbox)
+        client = Mistral(api_key=cfg.mistral_api_key)
+        models = mistral_models or [
+            cfg.model if cfg.provider == "mistral"
+            else os.environ.get("MISTRAL_MODEL") or DEFAULT_MODEL["mistral"]]
+        for model in models:
+            agents[f"mistral:{model}"] = MistralAgent(
+                client, model, cfg.max_tokens, system_blocks, toolbox)
     return agents
 
 
@@ -109,7 +113,10 @@ def main(argv: list[str]) -> int:
     backfill_kestra(cfg, kestra_log)
     toolbox = ToolBox(snap, max_bytes=cfg.tool_read_max_bytes, kestra_log=kestra_log)
     system_blocks = build_system_blocks(snap)
-    agents = build_agents(cfg, system_blocks, toolbox)
+    mistral_models = None
+    if "--mistral-models" in argv:
+        mistral_models = argv[argv.index("--mistral-models") + 1].split(",")
+    agents = build_agents(cfg, system_blocks, toolbox, mistral_models)
     if not agents:
         print("Aucune clé provider — rien à lancer."); return 1
     print(f"Providers : {', '.join(agents)}  |  Kestra : {kestra_log.count()} évts\n")

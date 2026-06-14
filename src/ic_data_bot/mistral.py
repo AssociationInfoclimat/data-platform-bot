@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 
 from .claude import ISSUE_TITLE_PROMPT, MAX_TOOL_ITERATIONS, TITLE_PROMPT, AnswerResult
 from .tools import SCHEMAS, ToolError
+
+# Les modèles de raisonnement (Magistral) peuvent émettre leur réflexion dans
+# <think>…</think> au sein du contenu. On la retire avant tout affichage Discord.
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 
 def _cache_key(system_text: str) -> str:
@@ -23,19 +28,23 @@ def _count(usage) -> int:
 
 
 def _text_of(content) -> str:
-    """Le contenu d'un message peut être une string ou une liste de chunks."""
+    """Texte d'un message — string ou liste de chunks. Les chunks de raisonnement
+    (ThinkChunk, attribut `thinking`) sont ignorés ; les balises <think> en clair
+    sont retirées (filet de sécurité pour les modèles Magistral)."""
     if content is None:
         return ""
     if isinstance(content, str):
-        return content
-    parts = []
-    for c in content:
-        t = getattr(c, "text", None)
-        if t is None and isinstance(c, dict):
-            t = c.get("text")
-        if t:
-            parts.append(t)
-    return "".join(parts)
+        raw = content
+    else:
+        parts = []
+        for c in content:
+            t = getattr(c, "text", None)
+            if t is None and isinstance(c, dict):
+                t = c.get("text")
+            if t:
+                parts.append(t)
+        raw = "".join(parts)
+    return _THINK_RE.sub("", raw).strip()
 
 
 def _mistral_tools() -> list[dict]:
