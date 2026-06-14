@@ -17,11 +17,15 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
 import urllib.request
+from collections import defaultdict
 from pathlib import Path
+
+import yaml
 
 from ic_data_bot.bot import install_ops_overlay
 from ic_data_bot.config import load_config
@@ -29,15 +33,102 @@ from ic_data_bot.context import build_system_blocks
 from ic_data_bot.kestra_events import KestraEventLog
 from ic_data_bot.tools import ToolBox
 
-EVALS = {
-    "E1": "dans la table foudre, que contient exactement la colonne dh_usec ? Il y a un piège ?",
-    "E2": "quels contrats ODCS existent et lesquels sont en draft ?",
-    "E3": ("on envisage de décommissionner la table foudre (V5) pendant la migration : "
-           "qu'est-ce qui casse en aval, et qui écrit encore dedans ?"),
-    "E4": "sur quel hôte tourne TimescaleDB et c'est quoi son IP ?",
-    "E5": "la climato est à jour ?",
-}
+DATASET_PATH = Path(__file__).resolve().parent.parent / "docs" / "evals" / "dataset.yaml"
 DEFAULT_MODEL = {"anthropic": "claude-haiku-4-5", "mistral": "mistral-small-latest"}
+
+# Fallback si dataset.yaml absent : les 5 questions historiques, sans critères.
+EVALS_FALLBACK = [
+    {"id": "E1", "category": "pièges", "criteria": [],
+     "question": "dans la table foudre, que contient exactement la colonne dh_usec ? Il y a un piège ?"},
+    {"id": "E2", "category": "index", "criteria": [],
+     "question": "quels contrats ODCS existent et lesquels sont en draft ?"},
+    {"id": "E3", "category": "lineage", "criteria": [],
+     "question": "on envisage de décommissionner la table foudre (V5) pendant la migration : qu'est-ce qui casse en aval, et qui écrit encore dedans ?"},
+    {"id": "E4", "category": "ops", "criteria": [],
+     "question": "sur quel hôte tourne TimescaleDB et c'est quoi son IP ?"},
+    {"id": "E5", "category": "fraicheur", "criteria": [],
+     "question": "la climato est à jour ?"},
+]
+
+
+def load_questions() -> list[dict]:
+    """Charge dataset.yaml (id/category/question/criteria), sinon le fallback."""
+    if DATASET_PATH.is_file():
+        data = yaml.safe_load(DATASET_PATH.read_text(encoding="utf-8")) or {}
+        return [
+            {"id": q["id"], "category": q.get("category", "?"),
+             "question": q["question"], "criteria": q.get("criteria", [])}
+            for q in data.get("questions", [])
+        ]
+    return EVALS_FALLBACK
+
+
+# ── Grader LLM-juge ──────────────────────────────────────────────────────────
+JUDGE_SYS = (
+    "Tu es un évaluateur rigoureux et impartial. On te donne une QUESTION posée à "
+    "un assistant data, une liste numérotée de CRITÈRES (faits qui doivent figurer "
+    "dans une bonne réponse) et la RÉPONSE de l'assistant. Pour chaque critère, dis "
+    "s'il est rempli en te basant UNIQUEMENT sur la réponse — un critère compte comme "
+    "rempli si la réponse l'exprime clairement, même avec d'autres mots. Réponds "
+    "UNIQUEMENT par un objet JSON : "
+    '{"criteres":[{"i":0,"met":true}, ...],"note":"<une phrase de justification>"}'
+)
+_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def _judge_payload(question: str, criteria: list[str], answer: str) -> str:
+    crit = "\n".join(f"{i}) {c}" for i, c in enumerate(criteria))
+    return f"QUESTION :\n{question}\n\nCRITÈRES :\n{crit}\n\nRÉPONSE :\n{answer[:4000]}"
+
+
+def _parse_verdict(text: str, total: int) -> tuple[int, str]:
+    try:
+        d = json.loads(_JSON_RE.search(text).group(0))
+        met = sum(1 for c in d.get("criteres", []) if c.get("met"))
+        return min(met, total), str(d.get("note", ""))[:200]
+    except Exception:
+        return 0, "(verdict illisible)"
+
+
+def make_judge(cfg):
+    """Retourne (judge(question, criteria, answer)->(met,total,note), label) ou (None, None)."""
+    spec = os.environ.get("EVAL_JUDGE", "")
+    if spec:
+        prov, _, model = spec.partition(":")
+    elif cfg.anthropic_api_key:
+        prov, model = "anthropic", DEFAULT_MODEL["anthropic"]
+    elif cfg.mistral_api_key:
+        prov, model = "mistral", DEFAULT_MODEL["mistral"]
+    else:
+        return None, None
+    model = model or DEFAULT_MODEL.get(prov, "")
+
+    if prov == "anthropic":
+        import anthropic
+        client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+
+        def judge(question, criteria, answer):
+            r = client.messages.create(
+                model=model, max_tokens=600, system=JUDGE_SYS,
+                messages=[{"role": "user", "content": _judge_payload(question, criteria, answer)}])
+            text = "".join(b.text for b in r.content if getattr(b, "type", "") == "text")
+            met, note = _parse_verdict(text, len(criteria))
+            return met, len(criteria), note
+    else:
+        from mistralai.client import Mistral
+        client = Mistral(api_key=cfg.mistral_api_key)
+
+        def judge(question, criteria, answer):
+            r = client.chat.complete(
+                model=model, max_tokens=600,
+                messages=[{"role": "system", "content": JUDGE_SYS},
+                          {"role": "user", "content": _judge_payload(question, criteria, answer)}])
+            content = r.choices[0].message.content
+            text = content if isinstance(content, str) else \
+                "".join(getattr(c, "text", "") or "" for c in (content or []))
+            met, note = _parse_verdict(text, len(criteria))
+            return met, len(criteria), note
+    return judge, f"{prov}:{model}"
 
 
 def _discord_get(url: str, token: str, tries: int = 4):
@@ -119,30 +210,71 @@ def main(argv: list[str]) -> int:
     agents = build_agents(cfg, system_blocks, toolbox, mistral_models)
     if not agents:
         print("Aucune clé provider — rien à lancer."); return 1
-    print(f"Providers : {', '.join(agents)}  |  Kestra : {kestra_log.count()} évts\n")
+
+    grade = "--grade" in argv
+    judge, judge_label = make_judge(cfg) if grade else (None, None)
+    print(f"Providers : {', '.join(agents)}  |  Kestra : {kestra_log.count()} évts"
+          + (f"  |  Juge : {judge_label}" if judge else "") + "\n")
 
     # Sélection des questions
     if "-q" in argv:
-        q = argv[argv.index("-q") + 1]
-        items = [("ad-hoc", q)]
+        items = [{"id": "ad-hoc", "category": "?", "criteria": [],
+                  "question": argv[argv.index("-q") + 1]}]
     else:
-        ids = [a.upper() for a in argv if a.upper() in EVALS] or list(EVALS)
-        items = [(i, EVALS[i]) for i in ids]
+        catalog = load_questions()
+        wanted = {a.upper() for a in argv if not a.startswith("-")}
+        items = [q for q in catalog if q["id"].upper() in wanted] or catalog
 
-    for eid, question in items:
+    # scores[name][category] = [(met, total), ...]
+    scores: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+
+    for q in items:
         print("=" * 70)
-        print(f"[{eid}] {question}")
+        print(f"[{q['id']}] {q['question']}")
         for name, agent in agents.items():
             t0 = time.monotonic()
             try:
-                r = agent.answer(question, history=[])
+                r = agent.answer(q["question"], history=[])
                 dur = time.monotonic() - t0
-                print(f"\n--- {name}  (iters={r.iterations}, tokens={r.tokens}, {dur:.1f}s) ---")
-                print(r.text)
+                head = f"\n--- {name}  (iters={r.iterations}, tokens={r.tokens}, {dur:.1f}s"
+                if judge and q["criteria"]:
+                    try:
+                        met, total, note = judge(q["question"], q["criteria"], r.text)
+                    except Exception as exc:
+                        met, total, note = 0, len(q["criteria"]), f"juge KO: {type(exc).__name__}"
+                    scores[name][q["category"]].append((met, total))
+                    head += f", score {met}/{total}"
+                    print(head + ") ---")
+                    print(r.text[:500] if grade else r.text)
+                    print(f"   ⮑ juge: {note}")
+                else:
+                    print(head + ") ---")
+                    print(r.text)
             except Exception as exc:
                 print(f"\n--- {name} : ERREUR {type(exc).__name__}: {exc} ---")
         print()
+
+    if judge and scores:
+        _print_score_matrix(scores)
     return 0
+
+
+def _print_score_matrix(scores: dict) -> None:
+    cats = sorted({c for m in scores.values() for c in m})
+    print("=" * 70)
+    print("SCORES (critères remplis / total, par catégorie)\n")
+    width = max(len(n) for n in scores)
+    print(" " * (width + 2) + "  ".join(f"{c[:9]:>9}" for c in cats) + "   GLOBAL")
+    for name, bycat in scores.items():
+        cells = []
+        tot_met = tot_all = 0
+        for c in cats:
+            pairs = bycat.get(c, [])
+            met = sum(m for m, _ in pairs); tot = sum(t for _, t in pairs)
+            tot_met += met; tot_all += tot
+            cells.append(f"{(met/tot*100):>7.0f}%" if tot else f"{'—':>8}")
+        glob = f"{(tot_met/tot_all*100):.0f}% ({tot_met}/{tot_all})" if tot_all else "—"
+        print(f"{name:<{width}}  " + "  ".join(cells) + f"   {glob}")
 
 
 if __name__ == "__main__":

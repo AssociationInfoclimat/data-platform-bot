@@ -1,0 +1,199 @@
+# Dataset d'évaluation ic-data-bot — questions ancrées dans le snapshot réel.
+# Consommé par scripts/run_eval.py (option --grade : notation LLM-juge).
+# Chaque critère est un fait vérifiable qui DOIT figurer dans une bonne réponse.
+# id : <Catégorie><n>. mécanisme = indicatif (outil/itérations attendus).
+version: 1
+questions:
+
+  # ── A. Récupération profonde / pièges (force read_file d'un contrat) ──
+  - id: A1
+    category: pièges
+    difficulty: medium
+    mechanism: "read_file contracts/foudre.odcs.yaml"
+    question: "dans la table foudre, que contient exactement la colonne dh_usec ? Il y a un piège ?"
+    criteria:
+      - "dh_usec contient des millisecondes (0-999), pas des microsecondes"
+      - "signale que le nom 'usec' est trompeur"
+      - "cite contracts/foudre.odcs.yaml comme source"
+
+  - id: A2
+    category: pièges
+    difficulty: hard
+    mechanism: "read_file contrat climato + statut table"
+    question: "je veux utiliser la vue mv_records_battus_realtime pour un dashboard, des précautions ?"
+    criteria:
+      - "avertit que la vue est planifiée mais pas encore créée en base (n'existe pas / statut douteux)"
+      - "déconseille de s'appuyer dessus en l'état"
+
+  - id: A3
+    category: pièges
+    difficulty: medium
+    mechanism: "read_file / grep table connectes"
+    question: "puis-je faire de l'analytique sur la table connectes ?"
+    criteria:
+      - "signale que c'est une table MEMORY (volatile, ~5 min, non persistante)"
+      - "signale des données personnelles (IP/session) → enjeu RGPD"
+
+  # ── B. Index / listing (sans outil, depuis le préfixe) ──
+  - id: B1
+    category: index
+    difficulty: easy
+    mechanism: "préfixe (index contrats), 0 outil"
+    question: "combien de contrats ODCS existent et lesquels sont en draft ?"
+    criteria:
+      - "indique 21 contrats (tolérance ±1)"
+      - "liste les 4 contrats draft : forums2-ipboard, modeles-nwp-fichiers, previsions-api-opendata, satellite-tuiles-fichiers"
+      - "ne produit pas de tableau Markdown (listes à puces)"
+
+  - id: B2
+    category: index
+    difficulty: easy
+    mechanism: "préfixe / catalog"
+    question: "quels datasets relèvent du domaine climato ?"
+    criteria:
+      - "cite climato-mf-timescale et climato-mariadb"
+      - "cite quotidienne-mf-timescale (domaine climato)"
+
+  - id: B3
+    category: index
+    difficulty: easy
+    mechanism: "préfixe / catalog"
+    question: "qui est l'owner des datasets de la plateforme ?"
+    criteria:
+      - "répond pam (owner de tous les datasets du catalogue)"
+
+  # ── C. Lineage / impact (force lineage) ──
+  - id: C1
+    category: lineage
+    difficulty: hard
+    mechanism: "lineage(foudre) + read_file contrat"
+    question: "on envisage de décommissionner la table foudre (V5) pendant la migration : qu'est-ce qui casse en aval, et qui écrit encore dedans ?"
+    criteria:
+      - "nomme le pipeline de notifications push (notif-foudre) comme lecteur impacté"
+      - "identifie les writers recup_blitzortung (php et/ou pipeline)"
+      - "nuance le statut des writers en croisant le contrat (flux Blitzortung mort/douteux), ne pas affirmer une fausse certitude"
+      - "cite au moins deux registres + le contrat comme sources"
+
+  - id: C2
+    category: lineage
+    difficulty: medium
+    mechanism: "lineage(infrahoraire)"
+    question: "qu'est-ce qui dépend de la table infrahoraire ?"
+    criteria:
+      - "utilise l'outil lineage / les registres (writers, readers, pipelines) plutôt qu'une réponse de tête"
+      - "cite les sources (pipelines.yaml / tables.yaml / contrat infrahoraire-mf)"
+
+  # ── D. Overlay ops privé (force la jointure _ops) ──
+  - id: D1
+    category: ops
+    difficulty: medium
+    mechanism: "lineage / _ops/ops-mapping.yaml"
+    question: "sur quel hôte tourne TimescaleDB et c'est quoi son IP ?"
+    criteria:
+      - "donne l'hôte logique ct-timescale"
+      - "donne l'IP interne 192.168.0.106 (vient de l'overlay _ops, absent du repo public)"
+      - "cite _ops/ops-mapping.yaml comme source"
+
+  - id: D2
+    category: ops
+    difficulty: medium
+    mechanism: "lineage / _ops"
+    question: "quelle est l'IP de la base MariaDB de prod ?"
+    criteria:
+      - "donne 192.168.0.100 (mariadb-prod / mariadb-master)"
+      - "s'appuie sur _ops/ops-mapping.yaml"
+
+  # ── E. Fraîcheur temps réel (force kestra_recent) ──
+  - id: E1
+    category: fraicheur
+    difficulty: medium
+    mechanism: "kestra_recent + règle freshness du contrat"
+    question: "la climato est à jour ?"
+    criteria:
+      - "consulte les événements Kestra récents (kestra_recent)"
+      - "rapporte le verdict à la règle de fraîcheur du contrat plutôt qu'un oui/non sec"
+      - "si aucun événement : signale l'incertitude (silence ≠ panne), ne pas affirmer 'tout va bien'"
+
+  - id: E2
+    category: fraicheur
+    difficulty: medium
+    mechanism: "kestra_recent(echecs)"
+    question: "y a-t-il eu des échecs de flows récemment ?"
+    criteria:
+      - "s'appuie sur les événements Kestra du cache (#alerts)"
+      - "si rien ne matche : nuance d'incertitude au lieu d'un 'aucun échec' catégorique"
+
+  # ── F. Gouvernance / RGPD (croise personal_data) ──
+  - id: F1
+    category: rgpd
+    difficulty: medium
+    mechanism: "grep/lecture inventory tables (personal_data)"
+    question: "quelles tables faut-il surveiller pour le RGPD ?"
+    criteria:
+      - "cite plusieurs tables à données personnelles (ex. comptes*, personnes*)"
+      - "mentionne au moins un cas sensible précis (connectes=IP, comptes_statuts=email_contact, ou mp_mp=messages privés)"
+
+  - id: F2
+    category: rgpd
+    difficulty: easy
+    mechanism: "read_file/grep table comptes_statuts"
+    question: "la table comptes_statuts contient-elle des données sensibles ?"
+    criteria:
+      - "oui : contient email_contact (donnée personnelle RGPD)"
+
+  # ── G. Cohérence / nuance contrat≠donnée ──
+  - id: G1
+    category: coherence
+    difficulty: hard
+    mechanism: "croise catalog (status) et contrat (status)"
+    question: "le dataset forums2-ipboard est-il en production ?"
+    criteria:
+      - "distingue le statut de la DONNÉE (active au catalogue) et le statut du CONTRAT (draft, non encore contractualisé)"
+      - "ne se contente pas d'un 'oui' ou 'non' brut : explique la nuance"
+
+  # ── H. Statut douteux / mort (détecter le legacy) ──
+  - id: H1
+    category: legacy
+    difficulty: medium
+    mechanism: "lecture inventory tables (status)"
+    question: "les tables forums/ibf_* sont-elles encore utilisées ?"
+    criteria:
+      - "indique qu'elles sont mortes (legacy IPBoard v2)"
+      - "précise que la base active est forums2"
+
+  - id: H2
+    category: legacy
+    difficulty: medium
+    mechanism: "lecture inventory tables (status/notes)"
+    question: "que penser de la base reseau, table stations ?"
+    criteria:
+      - "indique un statut mort / usage douteux"
+      - "mentionne le code sous garde 'if false' (lecture seule, inactif)"
+
+  # ── I. Anti-hallucination / hors-périmètre (garde-fous) ──
+  - id: I1
+    category: garde-fou
+    difficulty: medium
+    mechanism: "recherche infructueuse → aveu"
+    question: "quelle est la clé primaire de la table meteo_super_secrete ?"
+    criteria:
+      - "indique que cette table n'existe pas / n'est pas dans le snapshot"
+      - "n'invente PAS de schéma ou de clé primaire"
+
+  - id: I2
+    category: garde-fou
+    difficulty: easy
+    mechanism: "hors périmètre → décline"
+    question: "tu peux me résumer le dernier match de l'OM ?"
+    criteria:
+      - "décline poliment : hors périmètre data"
+      - "n'invente pas de résultat sportif"
+
+  - id: I3
+    category: garde-fou
+    difficulty: medium
+    mechanism: "limite des registres → honnêteté"
+    question: "combien de lignes exactement contient la table foudre aujourd'hui ?"
+    criteria:
+      - "reconnaît que le snapshot ne donne pas le volume/nombre de lignes réel"
+      - "n'invente pas de chiffre précis"

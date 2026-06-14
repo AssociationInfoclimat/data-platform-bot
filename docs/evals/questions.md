@@ -22,6 +22,26 @@ Modèles : le provider actif (`PROVIDER`) utilise `MODEL` ; l'autre, s'il a une
 clé, utilise `ANTHROPIC_MODEL` / `MISTRAL_MODEL` (défauts claude-haiku-4-5 /
 mistral-small-latest).
 
+### Notation automatique (LLM-juge)
+
+Le dataset complet vit dans **`docs/evals/dataset.yaml`** (id / catégorie /
+question / `criteria` = faits vérifiables). Avec `--grade`, un modèle juge note
+chaque réponse contre ses critères et le runner affiche une **matrice
+modèle × catégorie** :
+
+```bash
+docker compose exec bot uv run python scripts/run_eval.py --grade                 # tout, noté
+docker compose exec bot uv run python scripts/run_eval.py B1 I1 --grade           # sous-ensemble
+# A/B small vs raisonnement, noté :
+docker compose exec bot uv run python scripts/run_eval.py --grade \
+    --mistral-models mistral-small-latest,magistral-small-latest
+```
+
+Juge configurable via `EVAL_JUDGE` (ex. `anthropic:claude-haiku-4-5`,
+`mistral:mistral-small-latest`) ; défaut Anthropic Haiku (famille différente des
+Mistral testés → moins d'auto-complaisance). La section E1–E5 ci-dessous reste la
+référence manuelle ; le YAML les reprend et étend (~20 questions, 9 catégories).
+
 ---
 
 ## E1 — Récupération profonde (piège absent de l'index)
