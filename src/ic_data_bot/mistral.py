@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
 from .claude import ISSUE_TITLE_PROMPT, MAX_TOOL_ITERATIONS, TITLE_PROMPT, AnswerResult
 from .tools import SCHEMAS, ToolError
+
+
+def _cache_key(system_text: str) -> str:
+    """Clé de cache de prompt Mistral, stable tant que le préfixe system ne
+    change pas (il évolue au refresh du snapshot → nouvelle clé, nouveau cache).
+    Permet à Mistral de réutiliser le préfixe (~11k tokens) à tarif réduit entre
+    requêtes rapprochées ET entre itérations de la boucle d'outils."""
+    return "icbot-" + hashlib.sha256(system_text.encode("utf-8")).hexdigest()[:24]
 
 __all__ = ["MistralAgent", "ISSUE_TITLE_PROMPT", "TITLE_PROMPT"]
 
@@ -68,13 +77,16 @@ class MistralAgent:
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": question[:500]},
             ],
+            prompt_cache_key=_cache_key(prompt),
         )
         text = _text_of(resp.choices[0].message.content)
         title = " ".join(text.split()).strip(" \"'«»“”")
         return AnswerResult(text=title, tokens=_count(resp.usage), iterations=1)
 
     def answer(self, question: str, history: list[dict]) -> AnswerResult:
-        messages: list[dict] = [{"role": "system", "content": self._system_text()}]
+        system_text = self._system_text()
+        cache_key = _cache_key(system_text)
+        messages: list[dict] = [{"role": "system", "content": system_text}]
         messages += list(history)
         messages.append({"role": "user", "content": question})
         total = 0
@@ -85,6 +97,7 @@ class MistralAgent:
                 max_tokens=self.max_tokens,
                 messages=messages,
                 tools=self._tools,
+                prompt_cache_key=cache_key,
             )
             total += _count(resp.usage)
             choice = resp.choices[0]

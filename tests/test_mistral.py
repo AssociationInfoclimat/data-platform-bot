@@ -127,3 +127,18 @@ def test_content_can_be_chunk_list():
     ])
     agent = MistralAgent(client, "m", 100, SYS, _Box())
     assert agent.answer("q", []).text == "ab"
+
+
+def test_prompt_cache_key_stable_and_passed():
+    from ic_data_bot.mistral import _cache_key
+    # déterministe et stable pour un même préfixe
+    assert _cache_key("abc") == _cache_key("abc")
+    assert _cache_key("abc") != _cache_key("abd")
+    assert _cache_key("abc").startswith("icbot-")
+
+    client = _FakeClient([_resp("stop", _msg("ok"), _usage(1, 1))])
+    agent = MistralAgent(client, "m", 100, SYS, _Box())
+    agent.answer("q", [])
+    kw = client.chat.kwargs[0]
+    # la clé envoyée = hash du préfixe system aplati
+    assert kw["prompt_cache_key"] == _cache_key("persona\n\nnoyau")
