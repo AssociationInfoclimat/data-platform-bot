@@ -74,6 +74,15 @@ def split_for_discord(text: str, limit: int = 1900, max_messages: int = 3) -> li
     return chunks
 
 
+PROVIDER_LABELS = {"anthropic": "Claude", "mistral": "Mistral"}
+
+
+def provider_nick(base: str, provider: str) -> str:
+    """Pseudo du bot reflétant le provider actif (≤ 32 car., limite Discord)."""
+    label = PROVIDER_LABELS.get(provider, provider)
+    return f"{base} · {label}"[:32]
+
+
 def format_budget_message(budget) -> str:
     """Réponse à `!budget` — état du plafond quotidien, sans appel au modèle."""
     remaining = budget.remaining()
@@ -334,6 +343,34 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
         except Exception as exc:
             print(f"[incident] analyse impossible pour {flow} : {type(exc).__name__}", flush=True)
 
+    async def _apply_identity():
+        """Reflète le provider actif dans l'identité du bot : pseudo par serveur
+        (gratuit) + avatar (rate-limité → seulement si le provider a changé)."""
+        nick = provider_nick(discord_client.user.name, cfg.provider)
+        for g in discord_client.guilds:
+            try:
+                await g.me.edit(nick=nick)
+            except Exception as exc:
+                print(f"[identity] pseudo KO ({g.id}) : {type(exc).__name__}", flush=True)
+        # Avatar : logo assets/logo-<provider>.png si présent. L'édition d'avatar
+        # est globale et fortement rate-limitée → on n'édite que si le provider a
+        # changé depuis la dernière fois (marqueur dans le volume d'état).
+        logo = Path("assets") / f"logo-{cfg.provider}.png"
+        marker = Path(cfg.budget_state_path).parent / "avatar-provider.marker"
+        if not logo.is_file():
+            print(f"[identity] pas de logo {logo} (avatar inchangé)", flush=True)
+            return
+        prev = marker.read_text().strip() if marker.is_file() else ""
+        if prev == cfg.provider:
+            return
+        try:
+            await discord_client.user.edit(avatar=logo.read_bytes())
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(cfg.provider)
+            print(f"[identity] avatar → {cfg.provider}", flush=True)
+        except Exception as exc:
+            print(f"[identity] avatar KO : {type(exc).__name__}", flush=True)
+
     @discord_client.event
     async def setup_hook():
         # Conserver des références fortes : sinon le AppRunner (et la tâche de
@@ -346,6 +383,9 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
     @discord_client.event
     async def on_ready():
         state.discord_ready = True
+        if not getattr(discord_client, "_identity_done", False):
+            discord_client._identity_done = True
+            await _apply_identity()
 
     @discord_client.event
     async def on_message(message: "discord.Message") -> None:

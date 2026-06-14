@@ -202,3 +202,13 @@ def test_refresh_once_reinstalls_overlay(tmp_path):
     # le résumé des registres mentionne l'overlay
     joined = "\n".join(b["text"] for b in agent.system_blocks)
     assert "_ops/ops-mapping.yaml" in joined and "INTERNE" in joined
+
+
+def test_provider_nick():
+    from ic_data_bot.bot import provider_nick
+    assert provider_nick("bot-data-ic", "anthropic") == "bot-data-ic · Claude"
+    assert provider_nick("bot-data-ic", "mistral") == "bot-data-ic · Mistral"
+    # provider inconnu : libellé = provider brut
+    assert provider_nick("bot", "xyz") == "bot · xyz"
+    # tronqué à 32 caractères (limite Discord)
+    assert len(provider_nick("x" * 40, "mistral")) == 32
