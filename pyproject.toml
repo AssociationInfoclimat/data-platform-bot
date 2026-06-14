@@ -10,6 +10,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "aiohttp>=3.10",
     "mistralai>=2.4.9",
+    "langfuse>=4.7.1",
 ]
 
 [project.scripts]

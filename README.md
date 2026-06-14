@@ -36,6 +36,14 @@ du bot est commun.
 **Raisonnement ciblé (Mistral)** : `MISTRAL_REASONING_MODEL` (défaut `magistral-small-latest`) est utilisé par la commande `!deep <question>` (analyse approfondie à la demande) et par l'expliqueur d'incident. Magistral raisonne nativement — 5× le prix de small mais bien meilleur sur l'impact/lineage complexe ; réservé donc à ces deux usages, le Q&R normal restant sur le modèle rapide. Note : Mistral n'a pas de prompt caching, le préfixe system est
 refacturé à chaque message — `DAILY_TOKEN_BUDGET` se vide plus vite qu'avec Haiku+cache.
 
+## Observabilité (Langfuse)
+
+Optionnel. Avec `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` dans le `.env`, le bot
+trace chaque question (modèle, tokens, latence) et le runner d'éval (`--langfuse`)
+pousse le dataset + les traces + les **scores du juge** dans Langfuse. Les détails
+internes (IP, domaines homelab) sont **rédactés** avant envoi par défaut
+(`LANGFUSE_REDACT=1`) — important si l'instance est en cloud. Sans clés : désactivé.
+
 ## Déploiement
 
 Docker compose sur n'importe quel hôte (prérequis et mise en service :

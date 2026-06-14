@@ -29,6 +29,10 @@ class Config:
     kestra_events_channel_id: int
     kestra_alerts_channel_id: int
     incident_explainer: bool
+    langfuse_public_key: str
+    langfuse_secret_key: str
+    langfuse_host: str
+    langfuse_redact: bool
     history_ttl_seconds: int
     history_max_turns: int
     repo_url: str
@@ -74,6 +78,10 @@ def load_config(env: Mapping[str, str]) -> Config:
         kestra_events_channel_id=_int("KESTRA_EVENTS_CHANNEL_ID", 0),
         kestra_alerts_channel_id=_int("KESTRA_ALERTS_CHANNEL_ID", 0),
         incident_explainer=(env.get("INCIDENT_EXPLAINER") or "1").lower() not in ("0", "false", "no"),
+        langfuse_public_key=env.get("LANGFUSE_PUBLIC_KEY") or "",
+        langfuse_secret_key=env.get("LANGFUSE_SECRET_KEY") or "",
+        langfuse_host=env.get("LANGFUSE_HOST") or "https://cloud.langfuse.com",
+        langfuse_redact=(env.get("LANGFUSE_REDACT") or "1").lower() not in ("0", "false", "no"),
         history_ttl_seconds=_int("HISTORY_TTL_SECONDS", 1800),
         history_max_turns=_int("HISTORY_MAX_TURNS", 5),
         repo_url=env.get("REPO_URL") or "",

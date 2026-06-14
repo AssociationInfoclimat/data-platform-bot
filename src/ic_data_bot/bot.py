@@ -5,6 +5,7 @@ import json
 import re
 import time
 from collections import defaultdict
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -16,6 +17,7 @@ from .corrections import CorrectionsStore
 from .github_issues import close_issue, contains_internal_details, create_issue, issue_body
 from .guardrails import DailyBudget, RateLimiter, is_allowed_channel
 from .kestra_events import KestraEventLog
+from .telemetry import make_langfuse, redact
 from .tools import ToolBox
 
 RATE_LIMITED_MSG = "Tu as posé trop de questions d'un coup, réessaie dans un instant. 🙏"
@@ -185,11 +187,13 @@ class ThreadHistory:
 
 class BotApp:
     def __init__(self, agent: DataManagerAgent, rate_limiter: RateLimiter,
-                 budget: DailyBudget, history: ThreadHistory):
+                 budget: DailyBudget, history: ThreadHistory, langfuse=None, redact=True):
         self.agent = agent
         self.rate_limiter = rate_limiter
         self.budget = budget
         self.history = history
+        self.langfuse = langfuse
+        self.redact = redact
 
     @staticmethod
     def _log(**fields) -> None:
@@ -208,11 +212,23 @@ class BotApp:
             self._log(user=user_id, status="no_budget", q_chars=len(question))
             return NO_BUDGET_MSG
         history = self.history.get(thread_id)
+        model = getattr(agent, "model", "?")
+        trace = nullcontext(None)
+        if self.langfuse is not None:
+            trace = self.langfuse.start_as_current_observation(
+                name="question", as_type="generation", model=model,
+                input=redact(question, self.redact),
+                metadata={"user": user_id, "thread": thread_id})
         try:
-            result = await asyncio.to_thread(agent.answer, question, history)
+            with trace as gen:
+                result = await asyncio.to_thread(agent.answer, question, history)
+                if gen is not None:
+                    gen.update(output=redact(result.text, self.redact),
+                               usage_details={"total": result.tokens},
+                               metadata={"iterations": result.iterations})
         except Exception as exc:  # ne jamais crasher le bot sur une erreur d'API/outil
             self._log(user=user_id, status="error", q_chars=len(question),
-                      model=getattr(agent, "model", "?"),
+                      model=model,
                       dur_s=round(time.monotonic() - t0, 2), error=type(exc).__name__)
             return ERROR_MSG
         self.budget.add(result.tokens)
@@ -272,11 +288,14 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
     print(f"[provider] {cfg.provider} — modèle {cfg.model} "
           f"(raisonnement : {reasoning_label})", flush=True)
 
+    langfuse = make_langfuse(cfg)
     app = BotApp(
         agent=agent,
         rate_limiter=RateLimiter(cfg.user_rate_limit, cfg.rate_window_seconds),
         budget=DailyBudget(Path(cfg.budget_state_path), cfg.daily_token_budget),
         history=ThreadHistory(cfg.history_max_turns, cfg.history_ttl_seconds),
+        langfuse=langfuse,
+        redact=cfg.langfuse_redact,
     )
 
     state = ReadyState(core_loaded=True)

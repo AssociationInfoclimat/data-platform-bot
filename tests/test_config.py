@@ -72,3 +72,12 @@ def test_mistral_reasoning_model_default_and_override():
     assert cfg.mistral_reasoning_model == "magistral-small-latest"
     cfg2 = load_config({**BASE, "MISTRAL_REASONING_MODEL": "magistral-medium-latest"})
     assert cfg2.mistral_reasoning_model == "magistral-medium-latest"
+
+
+def test_langfuse_config_defaults_and_disabled():
+    cfg = load_config(BASE)
+    assert cfg.langfuse_public_key == "" and cfg.langfuse_secret_key == ""
+    assert cfg.langfuse_host == "https://cloud.langfuse.com"
+    assert cfg.langfuse_redact is True
+    cfg2 = load_config({**BASE, "LANGFUSE_REDACT": "0"})
+    assert cfg2.langfuse_redact is False

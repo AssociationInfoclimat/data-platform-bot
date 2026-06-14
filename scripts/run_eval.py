@@ -9,6 +9,8 @@ automatique si les deux clés sont là). Inclut un backfill Kestra pour E5.
     docker compose exec -T bot uv run python scripts/run_eval.py E1 E3      # évals choisies
     docker compose exec -T bot uv run python scripts/run_eval.py -q "ma question libre"
 
+Options : --grade (notation LLM-juge + matrice), --mistral-models a,b (A/B),
+--langfuse (pousse dataset + traces + scores dans Langfuse, si clés présentes).
 Modèles : le provider actif (PROVIDER) utilise MODEL ; l'autre provider, s'il a
 une clé, utilise ANTHROPIC_MODEL / MISTRAL_MODEL (défauts ci-dessous).
 """
@@ -23,6 +25,7 @@ import time
 import urllib.error
 import urllib.request
 from collections import defaultdict
+from contextlib import nullcontext
 from pathlib import Path
 
 import yaml
@@ -31,7 +34,10 @@ from ic_data_bot.bot import install_ops_overlay
 from ic_data_bot.config import load_config
 from ic_data_bot.context import build_system_blocks
 from ic_data_bot.kestra_events import KestraEventLog
+from ic_data_bot.telemetry import make_langfuse, redact
 from ic_data_bot.tools import ToolBox
+
+LANGFUSE_DATASET = "ic-data-bot-evals"
 
 DATASET_PATH = Path(__file__).resolve().parent.parent / "docs" / "evals" / "dataset.yaml"
 DEFAULT_MODEL = {"anthropic": "claude-haiku-4-5", "mistral": "mistral-small-latest"}
@@ -196,6 +202,25 @@ def build_agents(cfg, system_blocks, toolbox, mistral_models=None) -> dict:
     return agents
 
 
+def sync_langfuse_dataset(lf, items) -> None:
+    """Pousse les questions/critères comme dataset Langfuse (idempotent par id)."""
+    try:
+        lf.create_dataset(name=LANGFUSE_DATASET, description="Éval ancrée ic-data-bot")
+    except Exception:
+        pass
+    for q in items:
+        if not q.get("criteria"):
+            continue
+        try:
+            lf.create_dataset_item(
+                dataset_name=LANGFUSE_DATASET, id=f"icbot-{q['id']}",
+                input={"question": q["question"]},
+                expected_output="\n".join(q["criteria"]),
+                metadata={"id": q["id"], "category": q["category"]})
+        except Exception:
+            pass
+
+
 def main(argv: list[str]) -> int:
     cfg = load_config(os.environ)
     snap = Path(cfg.snapshot_dir)
@@ -213,8 +238,14 @@ def main(argv: list[str]) -> int:
 
     grade = "--grade" in argv
     judge, judge_label = make_judge(cfg) if grade else (None, None)
+
+    lf = make_langfuse(cfg) if "--langfuse" in argv else None
+    redact_on = cfg.langfuse_redact
+    run_name = "eval-" + datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
     print(f"Providers : {', '.join(agents)}  |  Kestra : {kestra_log.count()} évts"
-          + (f"  |  Juge : {judge_label}" if judge else "") + "\n")
+          + (f"  |  Juge : {judge_label}" if judge else "")
+          + (f"  |  Langfuse : {run_name}" if lf else "") + "\n")
 
     # Sélection des questions
     if "-q" in argv:
@@ -225,6 +256,9 @@ def main(argv: list[str]) -> int:
         wanted = {a.upper() for a in argv if not a.startswith("-")}
         items = [q for q in catalog if q["id"].upper() in wanted] or catalog
 
+    if lf:
+        sync_langfuse_dataset(lf, items)
+
     # scores[name][category] = [(met, total), ...]
     scores: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
 
@@ -233,29 +267,45 @@ def main(argv: list[str]) -> int:
         print(f"[{q['id']}] {q['question']}")
         for name, agent in agents.items():
             t0 = time.monotonic()
+            gen_cm = (lf.start_as_current_observation(
+                name=q["id"], as_type="generation", model=getattr(agent, "model", "?"),
+                input=redact(q["question"], redact_on),
+                metadata={"category": q["category"], "run": run_name, "agent": name})
+                if lf else nullcontext(None))
             try:
-                r = agent.answer(q["question"], history=[])
-                dur = time.monotonic() - t0
-                head = f"\n--- {name}  (iters={r.iterations}, tokens={r.tokens}, {dur:.1f}s"
-                if judge and q["criteria"]:
-                    try:
-                        met, total, note = judge(q["question"], q["criteria"], r.text)
-                    except Exception as exc:
-                        met, total, note = 0, len(q["criteria"]), f"juge KO: {type(exc).__name__}"
-                    scores[name][q["category"]].append((met, total))
-                    head += f", score {met}/{total}"
-                    print(head + ") ---")
-                    print(r.text[:500] if grade else r.text)
-                    print(f"   ⮑ juge: {note}")
-                else:
-                    print(head + ") ---")
-                    print(r.text)
+                with gen_cm as gen:
+                    r = agent.answer(q["question"], history=[])
+                    dur = time.monotonic() - t0
+                    head = f"\n--- {name}  (iters={r.iterations}, tokens={r.tokens}, {dur:.1f}s"
+                    if gen is not None:
+                        gen.update(output=redact(r.text, redact_on),
+                                   usage_details={"total": r.tokens},
+                                   metadata={"iterations": r.iterations, "dur_s": round(dur, 1)})
+                    if judge and q["criteria"]:
+                        try:
+                            met, total, note = judge(q["question"], q["criteria"], r.text)
+                        except Exception as exc:
+                            met, total, note = 0, len(q["criteria"]), f"juge KO: {type(exc).__name__}"
+                        scores[name][q["category"]].append((met, total))
+                        head += f", score {met}/{total}"
+                        if gen is not None and total:
+                            gen.score_trace(name="eval", value=round(met / total, 3), comment=note[:300])
+                        print(head + ") ---")
+                        print(r.text[:500] if grade else r.text)
+                        print(f"   ⮑ juge: {note}")
+                    else:
+                        print(head + ") ---")
+                        print(r.text)
             except Exception as exc:
                 print(f"\n--- {name} : ERREUR {type(exc).__name__}: {exc} ---")
         print()
 
     if judge and scores:
         _print_score_matrix(scores)
+    if lf:
+        lf.flush()
+        print(f"\nLangfuse : run '{run_name}' + dataset '{LANGFUSE_DATASET}' envoyés "
+              f"({'traces rédactées' if redact_on else 'traces brutes'}).")
     return 0
 
 
