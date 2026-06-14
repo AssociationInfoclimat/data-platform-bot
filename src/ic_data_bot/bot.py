@@ -302,7 +302,10 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
             "2) l'impact aval CONCRET si ça ne repasse pas — tables non alimentées, "
             "cartes/services/notifications touchés, en termes métier, "
             "3) gravité (récurrence ? flow douteux/mort connu ?) et pièges documentés. "
-            "Termine par l'action recommandée en une ligne. Bref et actionnable."
+            "Termine par l'action recommandée en une ligne. Bref et actionnable.\n"
+            "FORMAT IMPÉRATIF (Discord) : JAMAIS de tableau Markdown (les `|` "
+            "s'affichent en brut). Utilise des listes à puces, du **gras** pour les "
+            "libellés et du `code` pour les noms techniques. Max 1500 caractères."
         )
         try:
             reply = await app.process(user_id="system:incident",
