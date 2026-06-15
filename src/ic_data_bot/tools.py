@@ -160,7 +160,10 @@ class ToolBox:
         """Jointure d'impact : entrées complètes des registres mentionnant `name`."""
         import yaml
 
-        needle = name.strip().lower()
+        # Normalise tiret/underscore : les ids Kestra utilisent des underscores
+        # (forum_rsync_uploads), le registre des tirets (forum-rsync-uploads) ; sans ça
+        # un flow ne matche pas sa famille (cf. issue #1).
+        needle = name.strip().lower().replace("-", "_")
         if not needle:
             raise ToolError("Nom vide.")
         sections: list[str] = []
@@ -190,7 +193,7 @@ class ToolBox:
                         dump = entry
                     else:
                         continue
-                    if needle in dump.lower():
+                    if needle in dump.lower().replace("-", "_"):
                         # Le statut/usage RÉEL d'une table (mort/douteux + notes legacy)
                         # vit dans inventory/tables.yaml. Le plafond de MAX_LINEAGE_
                         # ENTRIES_PER_FILE droppait ces entrées quand le nom matchait
@@ -236,7 +239,7 @@ class ToolBox:
                 f"contracts/{fp.name}"
                 for fp in sorted(contracts_dir.glob("*.odcs.yaml"))
                 if not fp.name.startswith("_")
-                and needle in fp.read_text(encoding="utf-8", errors="replace").lower()
+                and needle in fp.read_text(encoding="utf-8", errors="replace").lower().replace("-", "_")
             ]
             if mentioned:
                 sections.append(
