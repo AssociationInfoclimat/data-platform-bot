@@ -34,6 +34,21 @@ def redact(text: str | None, enabled: bool = True) -> str | None:
     return text
 
 
+def _langfuse_mask(data):
+    """Masque récursif appelé par le client Langfuse (`mask(data=...)`) à l'ingestion.
+    Applique redact() aux chaînes, descend dans dict/list. Centraliser ici permet aux
+    apps d'envoyer le TEXTE BRUT (ex. le juge d'éval note le brut, sans IP masquée qui
+    fausserait le score ops) tout en garantissant qu'aucune IP/host interne ne part
+    vers le Cloud."""
+    if isinstance(data, str):
+        return redact(data, True)
+    if isinstance(data, dict):
+        return {k: _langfuse_mask(v) for k, v in data.items()}
+    if isinstance(data, (list, tuple)):
+        return [_langfuse_mask(v) for v in data]
+    return data
+
+
 def make_langfuse(cfg):
     """Client Langfuse si les clés sont présentes, sinon None (no-op). Ne lève jamais."""
     if not (cfg.langfuse_public_key and cfg.langfuse_secret_key):
@@ -44,6 +59,7 @@ def make_langfuse(cfg):
             public_key=cfg.langfuse_public_key,
             secret_key=cfg.langfuse_secret_key,
             host=cfg.langfuse_host or "https://cloud.langfuse.com",
+            mask=_langfuse_mask if cfg.langfuse_redact else None,
         )
         print(f"[langfuse] actif → {cfg.langfuse_host} "
               f"(rédaction infra : {'on' if cfg.langfuse_redact else 'OFF'})", flush=True)

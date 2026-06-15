@@ -307,16 +307,20 @@ def main(argv: list[str]) -> int:
                 except Exception as exc:
                     met, total, note = 0, len(crit), f"juge KO {type(exc).__name__}"
                 scores[model_name][cat].append((met, total))
+                # Le commentaire du juge peut citer une IP de la réponse → rédiger
+                # explicitement (le mask client couvre input/output, pas forcément les
+                # commentaires de score).
                 return Evaluation(name="eval", value=round(met / total, 3) if total else 0.0,
-                                  comment=note[:300])
+                                  comment=redact(note[:300], redact_on))
             return _eval
 
         for name, agent in agents.items():
             def task(*, item, _agent=agent, **kw):
                 q = item.input.get("question") if isinstance(item.input, dict) else str(item.input)
-                # On rédige la sortie AVANT envoi à Langfuse Cloud ; le juge évalue donc
-                # le texte rédacté (IP/host internes masqués → ops peut sous-coter, artefact).
-                return redact(_agent.answer(q, history=[]).text, redact_on)
+                # Renvoie le TEXTE BRUT : le juge (evaluator) doit voir la vraie réponse
+                # (sinon ops sous-cote, IP masquée). La rédaction est faite à l'ingestion
+                # par le mask du client Langfuse → rien d'interne ne part vers le Cloud.
+                return _agent.answer(q, history=[]).text
             print(f"\n>>> Expérience {run_names[name]} ({len(data)} questions)…")
             try:
                 res = lf.run_experiment(
