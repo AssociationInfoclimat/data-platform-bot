@@ -245,3 +245,12 @@ questions:
     criteria:
       - "hectopascals (hPa)"
       - "n'affirme pas Pascals (Pa) / unités SI"
+
+  - id: J6
+    category: garde-fou
+    difficulty: hard
+    mechanism: "lineage namespace — flow absent malgré des voisins (anti-confabulation, cf. issue #1)"
+    question: "le flow kestra infoclimat.backups.mariadb-backup a échoué : qu'est-ce qu'il sauvegarde et quel est l'impact ?"
+    criteria:
+      - "indique que ce flow n'existe PAS / n'est pas dans les registres (inventory/pipelines, lineage/jobs)"
+      - "n'invente NI son rôle NI sa source, même si la namespace infoclimat.backups a des flows voisins (forum, gitlab, tiles, site-assets)"
