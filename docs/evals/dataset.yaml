@@ -197,3 +197,51 @@ questions:
     criteria:
       - "reconnaît que le snapshot ne donne pas le volume/nombre de lignes réel"
       - "n'invente pas de chiffre précis"
+
+  # ── J. Unités & cohérence contrats (vérifiés en base le 2026-06-15) ──
+  - id: J1
+    category: pièges
+    difficulty: medium
+    mechanism: "read_file contracts/infrahoraire-mf.odcs.yaml"
+    question: "la température t de InfrahoraireTempsReel est en quelle unité ?"
+    criteria:
+      - "indique des degrés Celsius (°C)"
+      - "n'affirme PAS Kelvin / unités SI"
+      - "cite le contrat infrahoraire-mf comme source"
+
+  - id: J2
+    category: pièges
+    difficulty: hard
+    mechanism: "comparaison static (MariaDB) vs infrahoraire/horaire (TimescaleDB)"
+    question: "l'unité du vent est-elle la même pour les stations StatIC et pour le temps réel Météo-France ?"
+    criteria:
+      - "non : StatIC (MariaDB) est en km/h"
+      - "le temps réel Météo-France (TimescaleDB, Infrahoraire/HoraireTempsReel) est en m/s"
+      - "ne confond pas les deux sources / unités"
+
+  - id: J3
+    category: garde-fou
+    difficulty: medium
+    mechanism: "read_file contracts/foudre.odcs.yaml"
+    question: "je veux analyser l'intensité (kA) des impacts dans la table foudre, c'est exploitable ?"
+    criteria:
+      - "avertit que la colonne intensite est à 0 / non renseignée (flux Blitzortung historique)"
+      - "ne prétend pas que des valeurs d'intensité exploitables existent"
+
+  - id: J4
+    category: garde-fou
+    difficulty: medium
+    mechanism: "read_file contracts/previsions-bulletins.odcs.yaml (physicalType: files)"
+    question: "bulletins_fichiers est-elle une table MariaDB que je peux requêter en SQL ?"
+    criteria:
+      - "non : c'est une sortie fichiers (physicalType files), pas une table SQL"
+      - "n'invente pas de schéma de table / colonnes SQL"
+
+  - id: J5
+    category: pièges
+    difficulty: medium
+    mechanism: "read_file contracts/infrahoraire-mf.odcs.yaml"
+    question: "en quelle unité sont les pressions pres et pmer de InfrahoraireTempsReel ?"
+    criteria:
+      - "hectopascals (hPa)"
+      - "n'affirme pas Pascals (Pa) / unités SI"
