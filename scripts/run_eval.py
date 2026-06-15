@@ -246,6 +246,15 @@ def main(argv: list[str]) -> int:
     grade = "--grade" in argv
     judge, judge_label = make_judge(cfg, judge_sys) if grade else (None, None)
 
+    # --repeat N : rejoue le dataset N fois (scores accumulés → matrice = moyenne sur
+    # N runs, pour stabiliser les petites catégories qui bougent run/run). Plafonné à 10.
+    repeat = 1
+    if "--repeat" in argv:
+        try:
+            repeat = max(1, min(10, int(argv[argv.index("--repeat") + 1])))
+        except (ValueError, IndexError):
+            repeat = 1
+
     redact_on = cfg.langfuse_redact
     run_ts = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     # Un Dataset Run (= expérience Langfuse) nommé PAR MODÈLE → comparable run/run
@@ -329,27 +338,32 @@ def main(argv: list[str]) -> int:
                             time.sleep(6 * (attempt + 1))
                             continue
                         raise
-            print(f"\n>>> Expérience {run_names[name]} ({len(data)} questions)…")
-            try:
-                res = lf.run_experiment(
-                    name="ic-data-bot eval",
-                    run_name=run_names[name],
-                    description=f"éval {name} — {run_ts}",
-                    data=data,
-                    task=task,
-                    evaluators=[make_evaluator(name)] if judge else [],
-                    max_concurrency=1,  # séquentiel : Mistral 429 en concurrence (tool_choice=any)
-                    metadata={"model": getattr(agent, "model", name), "provider": name,
-                              "persona_version": persona_v, "judge_version": judge_v},
-                )
+            for rep in range(repeat):
+                rn = f"{run_names[name]}-r{rep + 1}" if repeat > 1 else run_names[name]
+                print(f"\n>>> Expérience {rn} ({len(data)} questions, run {rep + 1}/{repeat})…")
                 try:
-                    print(res.format())
-                except Exception:
-                    pass
-            except Exception as exc:
-                print(f"[langfuse] run_experiment {name} KO : {type(exc).__name__}: {exc}")
+                    res = lf.run_experiment(
+                        name="ic-data-bot eval",
+                        run_name=rn,
+                        description=f"éval {name} — {run_ts} (run {rep + 1}/{repeat})",
+                        data=data,
+                        task=task,
+                        evaluators=[make_evaluator(name)] if judge else [],
+                        max_concurrency=1,  # séquentiel : Mistral 429 en concurrence (tool_choice=any)
+                        metadata={"model": getattr(agent, "model", name), "provider": name,
+                                  "persona_version": persona_v, "judge_version": judge_v,
+                                  "repeat_index": rep + 1},
+                    )
+                    try:
+                        print(res.format())
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    print(f"[langfuse] run_experiment {name} KO : {type(exc).__name__}: {exc}")
         lf.flush()
         if judge and scores:
+            if repeat > 1:
+                print(f"\n(matrice agrégée = moyenne sur {repeat} runs/modèle)")
             _print_score_matrix(scores)
         print(f"\nLangfuse : expériences {', '.join(run_names.values())} → dataset "
               f"'{LANGFUSE_DATASET}' (onglet Experiments, comparables run/run ; "
