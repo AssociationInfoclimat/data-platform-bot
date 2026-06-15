@@ -320,7 +320,15 @@ def main(argv: list[str]) -> int:
                 # Renvoie le TEXTE BRUT : le juge (evaluator) doit voir la vraie réponse
                 # (sinon ops sous-cote, IP masquée). La rédaction est faite à l'ingestion
                 # par le mask du client Langfuse → rien d'interne ne part vers le Cloud.
-                return _agent.answer(q, history=[]).text
+                # Retry/backoff sur 429 (rate limit Mistral, aggravé par tool_choice=any).
+                for attempt in range(4):
+                    try:
+                        return _agent.answer(q, history=[]).text
+                    except Exception as exc:
+                        if "429" in str(exc) and attempt < 3:
+                            time.sleep(6 * (attempt + 1))
+                            continue
+                        raise
             print(f"\n>>> Expérience {run_names[name]} ({len(data)} questions)…")
             try:
                 res = lf.run_experiment(
@@ -330,7 +338,7 @@ def main(argv: list[str]) -> int:
                     data=data,
                     task=task,
                     evaluators=[make_evaluator(name)] if judge else [],
-                    max_concurrency=4,
+                    max_concurrency=1,  # séquentiel : Mistral 429 en concurrence (tool_choice=any)
                     metadata={"model": getattr(agent, "model", name), "provider": name,
                               "persona_version": persona_v, "judge_version": judge_v},
                 )
