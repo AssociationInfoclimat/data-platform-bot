@@ -74,10 +74,21 @@ def _read(path: Path) -> str | None:
     return path.read_text(encoding="utf-8", errors="replace") if path.is_file() else None
 
 
+def _col_unit(prop: dict) -> str | None:
+    """Unité déclarée d'une colonne (customProperties property=unit), sinon None."""
+    for cp in prop.get("customProperties") or []:
+        if isinstance(cp, dict) and cp.get("property") == "unit":
+            return cp.get("value")
+    return None
+
+
 def summarize_contract(path: Path) -> str:
-    """Résumé compact d'un contrat ODCS : identité, but, tables et colonnes.
-    Les détails (usage, limitations, pièges, types) se lisent via read_file —
-    inliner les contrats entiers coûtait ~17k tokens de préfixe par question."""
+    """Résumé compact d'un contrat ODCS : identité, but, tables et colonnes (avec
+    leur unité quand déclarée). Les détails (usage, limitations, pièges, types) se
+    lisent via read_file — inliner les contrats entiers coûtait ~17k tokens de
+    préfixe par question. Les unités sont incluses dans l'index car une réponse
+    sans lecture confabulait l'unité (ex. °C lu comme Kelvin) : les avoir sous les
+    yeux dès le préfixe évite l'invention."""
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8", errors="replace")) or {}
     except yaml.YAMLError:
@@ -97,9 +108,14 @@ def summarize_contract(path: Path) -> str:
         if not isinstance(table, dict):
             continue
         kind = table.get("physicalType", "table")
-        cols = ", ".join(
-            p.get("name", "?") for p in table.get("properties") or [] if isinstance(p, dict)
-        )
+        parts = []
+        for p in table.get("properties") or []:
+            if not isinstance(p, dict):
+                continue
+            name = p.get("name", "?")
+            unit = _col_unit(p)
+            parts.append(f"{name} ({unit})" if unit else name)
+        cols = ", ".join(parts)
         suffix = f" : {cols}" if cols else " (colonnes non versionnées)"
         lines.append(f"  {kind} {table.get('name', '?')}{suffix}")
     return "\n".join(lines)
