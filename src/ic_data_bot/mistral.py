@@ -2,10 +2,30 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import threading
+import time
 
 from .claude import ISSUE_TITLE_PROMPT, MAX_TOOL_ITERATIONS, TITLE_PROMPT, AnswerResult, _tool_trace
 from .tools import SCHEMAS, ToolError
+
+# Throttle global des appels à l'API Mistral : son tier limite à ~5 req/s, et la
+# boucle d'outils (surtout tool_choice="any" = 2+ appels/question) dépasse ce seuil,
+# d'où des 429 (vu en éval). On garantit un espacement minimal entre TOUS les appels
+# Mistral (verrou partagé). Réglable via MISTRAL_MIN_INTERVAL_S ; défaut 0,25 s = 4/s,
+# sous la limite. Impact bot négligeable (questions séquentielles).
+_MISTRAL_MIN_INTERVAL_S = float(os.environ.get("MISTRAL_MIN_INTERVAL_S", "0.25"))
+_throttle_lock = threading.Lock()
+_last_call = [0.0]
+
+
+def _throttle() -> None:
+    with _throttle_lock:
+        wait = _MISTRAL_MIN_INTERVAL_S - (time.monotonic() - _last_call[0])
+        if wait > 0:
+            time.sleep(wait)
+        _last_call[0] = time.monotonic()
 
 # Les modèles de raisonnement (Magistral) peuvent émettre leur réflexion dans
 # <think>…</think> au sein du contenu. On la retire avant tout affichage Discord.
@@ -79,6 +99,7 @@ class MistralAgent:
 
     def thread_title(self, question: str, prompt: str = TITLE_PROMPT) -> AnswerResult:
         """Titre court (fil Discord, issue…) — appel minimal, sans outils."""
+        _throttle()
         resp = self.client.chat.complete(
             model=self.model,
             max_tokens=30,
@@ -108,6 +129,7 @@ class MistralAgent:
             # donc à s'ancrer (read_file/grep/lineage) AVANT toute réponse, au niveau
             # API. Itérations suivantes en "auto" (sinon il rebouclerait sans pouvoir
             # produire la réponse finale).
+            _throttle()
             resp = self.client.chat.complete(
                 model=self.model,
                 max_tokens=self.max_tokens,
