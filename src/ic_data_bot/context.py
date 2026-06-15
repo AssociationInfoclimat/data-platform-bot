@@ -52,6 +52,23 @@ SYSTEM_PERSONA = (
     "Réponds en français."
 )
 
+# Prompt management : le persona ci-dessus (code) est la source d'autorité et le
+# fallback. À l'init, bot.py appelle set_persona_source(langfuse) ; build_system_blocks
+# résout alors la version 'production' depuis Langfuse (éditable/versionnée sans
+# redeploy), avec retour au code si Langfuse est indisponible.
+_persona_lf = None
+
+
+def set_persona_source(lf) -> None:
+    global _persona_lf
+    _persona_lf = lf
+
+
+def resolve_persona() -> str:
+    from .telemetry import resolve_prompt
+    return resolve_prompt(_persona_lf, "ic-data-bot-persona", SYSTEM_PERSONA)
+
+
 # Fichiers du noyau, chargés tels quels (chemin relatif au snapshot).
 CORE_FILES = [
     "README.md",
@@ -242,7 +259,7 @@ def build_system_blocks(root: Path, corrections=None) -> list[dict]:
 
     core_text = "\n\n".join(parts)
     blocks = [
-        {"type": "text", "text": SYSTEM_PERSONA},
+        {"type": "text", "text": resolve_persona()},
         {"type": "text", "text": core_text, "cache_control": {"type": "ephemeral"}},
     ]
     # Errata des devs (!fix) — placés APRÈS le breakpoint de cache : leur ajout/

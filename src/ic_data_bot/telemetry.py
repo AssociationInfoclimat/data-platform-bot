@@ -51,3 +51,36 @@ def make_langfuse(cfg):
     except Exception as exc:
         print(f"[langfuse] init KO : {type(exc).__name__} — désactivé", flush=True)
         return None
+
+
+# --- Prompt management (git = source d'autorité, Langfuse = historique + runtime) ---
+def register_prompt(lf, name: str, text: str) -> None:
+    """Crée une nouvelle version 'production' du prompt `name` dans Langfuse SI le
+    texte diffère de la version courante (évite le spam de versions à chaque deploy).
+    No-op si lf absent ; ne lève jamais."""
+    if lf is None:
+        return
+    try:
+        cur = lf.get_prompt(name, label="production", cache_ttl_seconds=0, fallback="")
+        if getattr(cur, "prompt", None) == text:
+            return
+    except Exception:
+        pass
+    try:
+        lf.create_prompt(name=name, prompt=text, labels=["production"], type="text",
+                         commit_message="sync depuis le code")
+        print(f"[langfuse] prompt '{name}' versionné (label production)", flush=True)
+    except Exception as exc:
+        print(f"[langfuse] create_prompt {name} KO : {type(exc).__name__}", flush=True)
+
+
+def resolve_prompt(lf, name: str, fallback: str) -> str:
+    """Texte du prompt 'production' depuis Langfuse (cache TTL 5 min), sinon le
+    fallback (code). Ne lève jamais → la coupure Langfuse ne casse pas le bot."""
+    if lf is None:
+        return fallback
+    try:
+        return lf.get_prompt(name, label="production", fallback=fallback,
+                             cache_ttl_seconds=300).prompt
+    except Exception:
+        return fallback

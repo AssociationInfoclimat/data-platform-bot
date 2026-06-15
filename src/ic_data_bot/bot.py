@@ -12,12 +12,17 @@ from typing import Callable
 
 from .claude import ISSUE_TITLE_PROMPT, DataManagerAgent
 from .config import load_config
-from .context import build_system_blocks, format_contracts_message
+from .context import (
+    SYSTEM_PERSONA,
+    build_system_blocks,
+    format_contracts_message,
+    set_persona_source,
+)
 from .corrections import CorrectionsStore
 from .github_issues import close_issue, contains_internal_details, create_issue, issue_body
 from .guardrails import DailyBudget, RateLimiter, is_allowed_channel
 from .kestra_events import KestraEventLog
-from .telemetry import make_langfuse, redact
+from .telemetry import make_langfuse, redact, register_prompt
 from .tools import ToolBox
 
 RATE_LIMITED_MSG = "Tu as posé trop de questions d'un coup, réessaie dans un instant. 🙏"
@@ -257,6 +262,11 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
     snapshot = Path(cfg.snapshot_dir)
     install_ops_overlay(snapshot, cfg.ops_mapping_path)
     corrections = CorrectionsStore(Path(cfg.corrections_path))
+    langfuse = make_langfuse(cfg)
+    # Prompt management : versionne le persona (si changé) puis le sert depuis
+    # Langfuse (fallback code) — build_system_blocks le résout via resolve_persona().
+    register_prompt(langfuse, "ic-data-bot-persona", SYSTEM_PERSONA)
+    set_persona_source(langfuse)
     system_blocks = build_system_blocks(snapshot, corrections)
     kestra_log = KestraEventLog()
     kestra_channels = {
@@ -288,7 +298,6 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
     print(f"[provider] {cfg.provider} — modèle {cfg.model} "
           f"(raisonnement : {reasoning_label})", flush=True)
 
-    langfuse = make_langfuse(cfg)
     app = BotApp(
         agent=agent,
         rate_limiter=RateLimiter(cfg.user_rate_limit, cfg.rate_window_seconds),

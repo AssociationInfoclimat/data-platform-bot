@@ -32,9 +32,9 @@ import yaml
 
 from ic_data_bot.bot import install_ops_overlay
 from ic_data_bot.config import load_config
-from ic_data_bot.context import build_system_blocks
+from ic_data_bot.context import build_system_blocks, set_persona_source
 from ic_data_bot.kestra_events import KestraEventLog
-from ic_data_bot.telemetry import make_langfuse, redact
+from ic_data_bot.telemetry import make_langfuse, redact, register_prompt, resolve_prompt
 from ic_data_bot.tools import ToolBox
 
 LANGFUSE_DATASET = "ic-data-bot-evals"
@@ -96,8 +96,9 @@ def _parse_verdict(text: str, total: int) -> tuple[int, str]:
         return 0, "(verdict illisible)"
 
 
-def make_judge(cfg):
-    """Retourne (judge(question, criteria, answer)->(met,total,note), label) ou (None, None)."""
+def make_judge(cfg, judge_sys=JUDGE_SYS):
+    """Retourne (judge(question, criteria, answer)->(met,total,note), label) ou (None, None).
+    judge_sys = prompt système du juge (résolu depuis Langfuse, fallback code)."""
     spec = os.environ.get("EVAL_JUDGE", "")
     if spec:
         prov, _, model = spec.partition(":")
@@ -115,7 +116,7 @@ def make_judge(cfg):
 
         def judge(question, criteria, answer):
             r = client.messages.create(
-                model=model, max_tokens=600, system=JUDGE_SYS,
+                model=model, max_tokens=600, system=judge_sys,
                 messages=[{"role": "user", "content": _judge_payload(question, criteria, answer)}])
             text = "".join(b.text for b in r.content if getattr(b, "type", "") == "text")
             met, note = _parse_verdict(text, len(criteria))
@@ -127,7 +128,7 @@ def make_judge(cfg):
         def judge(question, criteria, answer):
             r = client.chat.complete(
                 model=model, max_tokens=600,
-                messages=[{"role": "system", "content": JUDGE_SYS},
+                messages=[{"role": "system", "content": judge_sys},
                           {"role": "user", "content": _judge_payload(question, criteria, answer)}])
             content = r.choices[0].message.content
             text = content if isinstance(content, str) else \
@@ -228,6 +229,12 @@ def main(argv: list[str]) -> int:
     kestra_log = KestraEventLog()
     backfill_kestra(cfg, kestra_log)
     toolbox = ToolBox(snap, max_bytes=cfg.tool_read_max_bytes, kestra_log=kestra_log)
+    lf = make_langfuse(cfg) if "--langfuse" in argv else None
+    # Prompt management : l'éval utilise le MÊME persona 'production' que la prod
+    # (Langfuse, fallback code), et versionne + résout le prompt du juge.
+    set_persona_source(lf)
+    register_prompt(lf, "ic-data-bot-judge", JUDGE_SYS)
+    judge_sys = resolve_prompt(lf, "ic-data-bot-judge", JUDGE_SYS)
     system_blocks = build_system_blocks(snap)
     mistral_models = None
     if "--mistral-models" in argv:
@@ -237,9 +244,8 @@ def main(argv: list[str]) -> int:
         print("Aucune clé provider — rien à lancer."); return 1
 
     grade = "--grade" in argv
-    judge, judge_label = make_judge(cfg) if grade else (None, None)
+    judge, judge_label = make_judge(cfg, judge_sys) if grade else (None, None)
 
-    lf = make_langfuse(cfg) if "--langfuse" in argv else None
     redact_on = cfg.langfuse_redact
     run_ts = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     # Un Dataset Run (= expérience Langfuse) nommé PAR MODÈLE → comparable run/run
@@ -279,6 +285,16 @@ def main(argv: list[str]) -> int:
             print("[langfuse] aucun item de dataset à évaluer (questions sans critères ?)")
             return 1
 
+        # Versions de prompt → métadonnées du run (lien version↔expérience).
+        def _pver(pname, fb):
+            try:
+                return lf.get_prompt(pname, label="production", fallback=fb,
+                                     cache_ttl_seconds=300).version
+            except Exception:
+                return None
+        persona_v = _pver("ic-data-bot-persona", "")
+        judge_v = _pver("ic-data-bot-judge", JUDGE_SYS)
+
         def make_evaluator(model_name):
             def _eval(*, input, output, expected_output=None, metadata=None, **kw):
                 if not judge:
@@ -311,7 +327,8 @@ def main(argv: list[str]) -> int:
                     task=task,
                     evaluators=[make_evaluator(name)] if judge else [],
                     max_concurrency=4,
-                    metadata={"model": getattr(agent, "model", name), "provider": name},
+                    metadata={"model": getattr(agent, "model", name), "provider": name,
+                              "persona_version": persona_v, "judge_version": judge_v},
                 )
                 try:
                     print(res.format())
