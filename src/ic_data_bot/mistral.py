@@ -10,12 +10,14 @@ import time
 from .claude import ISSUE_TITLE_PROMPT, MAX_TOOL_ITERATIONS, TITLE_PROMPT, AnswerResult, _tool_trace
 from .tools import SCHEMAS, ToolError
 
-# Throttle global des appels à l'API Mistral : son tier limite à ~5 req/s, et la
-# boucle d'outils (surtout tool_choice="any" = 2+ appels/question) dépasse ce seuil,
-# d'où des 429 (vu en éval). On garantit un espacement minimal entre TOUS les appels
-# Mistral (verrou partagé). Réglable via MISTRAL_MIN_INTERVAL_S ; défaut 0,25 s = 4/s,
-# sous la limite. Impact bot négligeable (questions séquentielles).
-_MISTRAL_MIN_INTERVAL_S = float(os.environ.get("MISTRAL_MIN_INTERVAL_S", "0.25"))
+# Throttle global des appels à l'API Mistral. mistral-small-latest = alias
+# mistral-small-2603, dont le tier limite à ~0,83 req/s (~50/min), PAS 5/s. La boucle
+# d'outils (tool_choice="any" = 2+ appels/question) dépasse vite ce seuil → 429. On
+# garantit un espacement minimal entre TOUS les appels Mistral (verrou partagé). Défaut
+# 1,3 s ≈ 0,77 req/s, sous 0,83 avec marge ; réglable via MISTRAL_MIN_INTERVAL_S (à
+# remonter si tier plus bas, à baisser si tier supérieur). Impact bot négligeable
+# (questions séquentielles, exécuté dans un worker thread).
+_MISTRAL_MIN_INTERVAL_S = float(os.environ.get("MISTRAL_MIN_INTERVAL_S", "1.3"))
 _throttle_lock = threading.Lock()
 _last_call = [0.0]
 
