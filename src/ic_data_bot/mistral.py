@@ -102,11 +102,18 @@ class MistralAgent:
         tools_used: list[str] = []
 
         for iteration in range(1, MAX_TOOL_ITERATIONS + 1):
+            # tool_choice="any" force un appel d'outil à la 1re itération : Mistral
+            # suit mal les ordres du préfixe (« lis la source ») et confabulait des
+            # détails (unités Kelvin/Pa) en répondant AUCUN outil. On le contraint
+            # donc à s'ancrer (read_file/grep/lineage) AVANT toute réponse, au niveau
+            # API. Itérations suivantes en "auto" (sinon il rebouclerait sans pouvoir
+            # produire la réponse finale).
             resp = self.client.chat.complete(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 messages=messages,
                 tools=self._tools,
+                tool_choice="any" if iteration == 1 else "auto",
                 prompt_cache_key=cache_key,
             )
             total += _count(resp.usage)
