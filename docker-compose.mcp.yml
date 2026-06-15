@@ -1,0 +1,33 @@
+services:
+  mcp:
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+    image: ic-data-bot:local
+    env_file: .env
+    # Lance le serveur MCP (PAS le bot) : override de l'entrypoint, qui fait lui-même
+    # le clone anonyme du repo public data-platform (jamais l'overlay _ops).
+    entrypoint: ["uv", "run", "--no-sync", "ic-data-bot-mcp"]
+    # Publié sur l'hôte pour que la bastion Traefik (autre machine) joigne le service.
+    ports:
+      - "${MCP_PORT:-8765}:8765"
+    # Volume DÉDIÉ, distinct du `clone` du bot (qui contient _ops/) → snapshot public propre.
+    volumes:
+      - clone-mcp:/data/data-platform
+    restart: unless-stopped
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  clone-mcp:

@@ -1,0 +1,47 @@
+import pytest
+
+from ic_data_bot.tools import ToolBox, ToolError
+
+
+def _snapshot(tmp_path):
+    (tmp_path / "contracts").mkdir()
+    (tmp_path / "contracts" / "foo.odcs.yaml").write_text("name: foo\nstatus: active\n", encoding="utf-8")
+    (tmp_path / "_ops").mkdir()
+    # overlay confidentiel : liste YAML avec une valeur interne unique
+    (tmp_path / "_ops" / "ops-mapping.yaml").write_text(
+        "ops_systems:\n  - name: secretthing\n    ip: 203.0.113.250\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_public_read_file_refuses_ops(tmp_path):
+    tb = ToolBox(_snapshot(tmp_path), public=True)
+    assert "name: foo" in tb.read_file("contracts/foo.odcs.yaml")
+    with pytest.raises(ToolError):
+        tb.read_file("_ops/ops-mapping.yaml")
+
+
+def test_public_grep_skips_ops(tmp_path):
+    tb = ToolBox(_snapshot(tmp_path), public=True)
+    out = tb.grep("203.0.113.250")
+    assert "203.0.113.250" not in out  # l'overlay _ops est ignoré
+
+
+def test_public_lineage_excludes_ops(tmp_path):
+    tb = ToolBox(_snapshot(tmp_path), public=True)
+    out = tb.lineage("secretthing")
+    assert "203.0.113.250" not in out
+
+
+def test_private_mode_still_serves_ops(tmp_path):
+    """Le bot (public=False, défaut) garde l'accès à l'overlay — comportement inchangé."""
+    tb = ToolBox(_snapshot(tmp_path), public=False)
+    assert "203.0.113.250" in tb.read_file("_ops/ops-mapping.yaml")
+    assert "203.0.113.250" in tb.lineage("secretthing")
+
+
+def test_mcp_server_imports_and_builds_app():
+    import os
+    os.environ["MCP_BEARER_TOKEN"] = "test-token"
+    from ic_data_bot import mcp_server
+    app = mcp_server._build_app()
+    assert app is not None

@@ -110,15 +110,24 @@ SCHEMAS = [
 
 
 class ToolBox:
-    def __init__(self, root: Path, max_bytes: int = 60_000, kestra_log=None):
+    def __init__(self, root: Path, max_bytes: int = 60_000, kestra_log=None, public: bool = False):
         self.root = Path(root).resolve()
         self.max_bytes = max_bytes
         self.kestra_log = kestra_log
+        # Mode public (serveur MCP exposé) : interdit l'overlay confidentiel _ops/
+        # (IP/hosts internes) dans read_file/grep/lineage. Défaut False = bot inchangé.
+        self.public = public
+        self._ops_dir = (self.root / "_ops").resolve()
+
+    def _is_ops(self, candidate: Path) -> bool:
+        return candidate == self._ops_dir or str(candidate).startswith(str(self._ops_dir) + os.sep)
 
     def _safe_path(self, rel: str) -> Path:
         candidate = (self.root / rel).resolve()
         if candidate != self.root and not str(candidate).startswith(str(self.root) + os.sep):
             raise ToolError(f"Chemin hors snapshot refusé : {rel}")
+        if self.public and self._is_ops(candidate):
+            raise ToolError(f"Chemin confidentiel refusé (mode public) : {rel}")
         return candidate
 
     def read_file(self, path: str) -> str:
@@ -142,6 +151,8 @@ class ToolBox:
         matches: list[str] = []
         for fp in sorted(self.root.glob(glob)):
             if not fp.is_file():
+                continue
+            if self.public and self._is_ops(fp.resolve()):
                 continue
             try:
                 text = fp.read_text(encoding="utf-8", errors="replace")
@@ -169,6 +180,8 @@ class ToolBox:
         sections: list[str] = []
         total = 0
         for rel in LINEAGE_FILES:
+            if self.public and rel.startswith("_ops/"):
+                continue  # overlay confidentiel exclu du mode public (MCP)
             path = self.root / rel
             if not path.is_file():
                 continue

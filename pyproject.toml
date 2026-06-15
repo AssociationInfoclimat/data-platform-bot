@@ -11,10 +11,13 @@ dependencies = [
     "aiohttp>=3.10",
     "mistralai>=2.4.9",
     "langfuse>=4.7.1",
+    "mcp>=1.2",
+    "uvicorn>=0.30",
 ]
 
 [project.scripts]
 ic-data-bot = "ic_data_bot.bot:run"
+ic-data-bot-mcp = "ic_data_bot.mcp_server:run"
 
 [dependency-groups]
 dev = [
