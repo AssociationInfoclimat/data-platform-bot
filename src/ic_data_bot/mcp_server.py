@@ -132,7 +132,16 @@ def _refresh_loop() -> None:
         _sync_corpus()
 
 
+def _valid_tokens() -> set[str]:
+    """Tokens bearer acceptés : MCP_BEARER_TOKEN (mono) + MCP_BEARER_TOKENS (CSV, un par
+    personne → révocable individuellement). Relu à chaque requête (restart pour appliquer)."""
+    raw = os.environ.get("MCP_BEARER_TOKEN", "") + "," + os.environ.get("MCP_BEARER_TOKENS", "")
+    return {t.strip() for t in raw.split(",") if t.strip()}
+
+
 def _build_app():
+    import hmac
+
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.responses import JSONResponse, PlainTextResponse
     from starlette.routing import Route
@@ -141,10 +150,12 @@ def _build_app():
         async def dispatch(self, request, call_next):
             if request.url.path == "/healthz":
                 return await call_next(request)
-            token = os.environ.get("MCP_BEARER_TOKEN", "")
-            if not token:
+            tokens = _valid_tokens()
+            if not tokens:
                 return JSONResponse({"error": "server misconfigured: no token"}, status_code=503)
-            if request.headers.get("authorization", "") != f"Bearer {token}":
+            auth = request.headers.get("authorization", "")
+            presented = auth[7:] if auth.startswith("Bearer ") else ""
+            if not any(hmac.compare_digest(presented, t) for t in tokens):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
             return await call_next(request)
 

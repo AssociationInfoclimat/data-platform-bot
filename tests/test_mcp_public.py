@@ -45,3 +45,13 @@ def test_mcp_server_imports_and_builds_app():
     from ic_data_bot import mcp_server
     app = mcp_server._build_app()
     assert app is not None
+
+
+def test_valid_tokens_multi(monkeypatch):
+    from ic_data_bot import mcp_server
+    monkeypatch.setenv("MCP_BEARER_TOKEN", "main")
+    monkeypatch.setenv("MCP_BEARER_TOKENS", "alice, bob ,")
+    assert mcp_server._valid_tokens() == {"main", "alice", "bob"}
+    monkeypatch.delenv("MCP_BEARER_TOKEN", raising=False)
+    monkeypatch.setenv("MCP_BEARER_TOKENS", "only")
+    assert mcp_server._valid_tokens() == {"only"}
