@@ -241,11 +241,14 @@ def main(argv: list[str]) -> int:
 
     lf = make_langfuse(cfg) if "--langfuse" in argv else None
     redact_on = cfg.langfuse_redact
-    run_name = "eval-" + datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    run_ts = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    # Un Dataset Run (= expérience Langfuse) nommé PAR MODÈLE → comparable run/run
+    # dans l'onglet Experiments, sans fouiller les traces pour savoir qui a répondu.
+    run_names = {name: f"{name}-{run_ts}" for name in agents}
 
     print(f"Providers : {', '.join(agents)}  |  Kestra : {kestra_log.count()} évts"
           + (f"  |  Juge : {judge_label}" if judge else "")
-          + (f"  |  Langfuse : {run_name}" if lf else "") + "\n")
+          + (f"  |  Langfuse exp : {', '.join(run_names.values())}" if lf else "") + "\n")
 
     # Sélection des questions
     if "-q" in argv:
@@ -256,8 +259,13 @@ def main(argv: list[str]) -> int:
         wanted = {a.upper() for a in argv if not a.startswith("-")}
         items = [q for q in catalog if q["id"].upper() in wanted] or catalog
 
+    dataset_items = {}
     if lf:
         sync_langfuse_dataset(lf, items)
+        try:
+            dataset_items = {it.id: it for it in lf.get_dataset(LANGFUSE_DATASET).items}
+        except Exception as exc:
+            print(f"[langfuse] get_dataset KO : {type(exc).__name__}: {exc}")
 
     # scores[name][category] = [(met, total), ...]
     scores: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
@@ -267,21 +275,28 @@ def main(argv: list[str]) -> int:
         print(f"[{q['id']}] {q['question']}")
         for name, agent in agents.items():
             t0 = time.monotonic()
-            gen_cm = (lf.start_as_current_observation(
-                name=q["id"], as_type="generation", model=getattr(agent, "model", "?"),
-                input=redact(q["question"], redact_on),
-                metadata={"category": q["category"], "run": run_name, "agent": name})
-                if lf else nullcontext(None))
+            item = dataset_items.get(f"icbot-{q['id']}")
+            run_cm = (item.run(
+                run_name=run_names[name],
+                run_description=f"éval {name} {run_ts}",
+                run_metadata={"model": getattr(agent, "model", "?"), "provider": name})
+                if (lf and item) else nullcontext(None))
             try:
-                with gen_cm as gen:
+                with run_cm as root:
                     r = agent.answer(q["question"], history=[])
                     dur = time.monotonic() - t0
                     head = f"\n--- {name}  (iters={r.iterations}, tokens={r.tokens}, {dur:.1f}s"
                     tool_line = "   ⚙ outils: " + (" → ".join(r.tools) if r.tools else "AUCUN")
-                    if gen is not None:
-                        gen.update(output=redact(r.text, redact_on),
-                                   usage_details={"total": r.tokens},
-                                   metadata={"iterations": r.iterations, "dur_s": round(dur, 1)})
+                    if root is not None:
+                        try:
+                            root.update_trace(
+                                input=redact(q["question"], redact_on),
+                                output=redact(r.text, redact_on),
+                                metadata={"iterations": r.iterations, "tokens": r.tokens,
+                                          "dur_s": round(dur, 1), "category": q["category"],
+                                          "tools": r.tools})
+                        except Exception as exc:
+                            print(f"   [langfuse] update_trace KO : {type(exc).__name__}")
                     if judge and q["criteria"]:
                         try:
                             met, total, note = judge(q["question"], q["criteria"], r.text)
@@ -289,8 +304,11 @@ def main(argv: list[str]) -> int:
                             met, total, note = 0, len(q["criteria"]), f"juge KO: {type(exc).__name__}"
                         scores[name][q["category"]].append((met, total))
                         head += f", score {met}/{total}"
-                        if gen is not None and total:
-                            gen.score_trace(name="eval", value=round(met / total, 3), comment=note[:300])
+                        if root is not None and total:
+                            try:
+                                root.score_trace(name="eval", value=round(met / total, 3), comment=note[:300])
+                            except Exception as exc:
+                                print(f"   [langfuse] score_trace KO : {type(exc).__name__}")
                         print(head + ") ---")
                         print(tool_line)
                         print(r.text[:500] if grade else r.text)
@@ -307,8 +325,9 @@ def main(argv: list[str]) -> int:
         _print_score_matrix(scores)
     if lf:
         lf.flush()
-        print(f"\nLangfuse : run '{run_name}' + dataset '{LANGFUSE_DATASET}' envoyés "
-              f"({'traces rédactées' if redact_on else 'traces brutes'}).")
+        print(f"\nLangfuse : expériences {', '.join(run_names.values())} sur dataset "
+              f"'{LANGFUSE_DATASET}' (onglet Experiments, comparables run/run ; "
+              f"{'traces rédactées' if redact_on else 'traces brutes'}).")
     return 0
 
 
