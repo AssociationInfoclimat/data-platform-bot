@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from . import gitsync
 from .context import resolve_persona
@@ -29,7 +30,20 @@ REFRESH_SECONDS = int(os.environ.get("MCP_REFRESH_SECONDS") or "3600")
 # ToolBox en MODE PUBLIC : read_file/grep/lineage refusent _ops/ (IP/hosts internes).
 _tb = ToolBox(Path(SNAPSHOT_DIR), public=True)
 
-mcp = FastMCP("data-platform", stateless_http=True)
+# Protection anti-DNS-rebinding du SDK (validation du Host) : derrière un reverse-proxy,
+# le Host devient le domaine public. On l'autorise via MCP_ALLOWED_HOSTS (CSV, hors repo).
+# Sans cette var (ex. dev local) → protection désactivée : on s'appuie sur Traefik + bearer.
+_allowed_hosts = [h.strip() for h in os.environ.get("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+if _allowed_hosts:
+    _security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_allowed_hosts,
+        allowed_origins=_allowed_hosts,
+    )
+else:
+    _security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+mcp = FastMCP("data-platform", stateless_http=True, transport_security=_security)
 
 
 # ── Tools ──────────────────────────────────────────────────────────────────

@@ -1,3 +1,5 @@
+name: ic-data-bot-mcp
+
 services:
   mcp:
     build:
