@@ -26,6 +26,7 @@ class Config:
     ops_mapping_path: str
     github_token: str
     github_issues_repo: str
+    meteofrance_application_id: str
     kestra_events_channel_id: int
     kestra_alerts_channel_id: int
     incident_explainer: bool
@@ -75,6 +76,7 @@ def load_config(env: Mapping[str, str]) -> Config:
         ops_mapping_path=env.get("OPS_MAPPING_PATH") or "./var/ops-mapping.yaml",
         github_token=env.get("GITHUB_TOKEN") or "",
         github_issues_repo=env.get("GITHUB_ISSUES_REPO") or "AssociationInfoclimat/data-platform",
+        meteofrance_application_id=env.get("METEOFRANCE_APPLICATION_ID") or env.get("MF_APPLICATION_ID") or "",
         kestra_events_channel_id=_int("KESTRA_EVENTS_CHANNEL_ID", 0),
         kestra_alerts_channel_id=_int("KESTRA_ALERTS_CHANNEL_ID", 0),
         incident_explainer=(env.get("INCIDENT_EXPLAINER") or "1").lower() not in ("0", "false", "no"),

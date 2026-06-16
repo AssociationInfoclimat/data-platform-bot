@@ -38,6 +38,14 @@ _tb.secret_scrub = make_llm_scrubber(
     mistral_key=os.environ.get("MISTRAL_API_KEY") or "",
 )
 
+# Probe live Météo-France via MCP : OPT-IN (MF_PROBE_ENABLED) car il déclenche des appels
+# à l'API MF avec la clé de l'asso depuis un endpoint à bearer partagé. Le catalogue et le
+# schéma (topic contract/schema) restent toujours consultables, sans credentials.
+_mf_app_id = os.environ.get("METEOFRANCE_APPLICATION_ID") or os.environ.get("MF_APPLICATION_ID") or ""
+if _mf_app_id and os.environ.get("MF_PROBE_ENABLED", "").lower() in ("1", "true", "yes"):
+    from .meteofrance_api import MeteoFranceAuth  # noqa: E402
+    _tb.meteofrance = MeteoFranceAuth(_mf_app_id)
+
 # Protection anti-DNS-rebinding du SDK (validation du Host) : derrière un reverse-proxy,
 # le Host devient le domaine public. On l'autorise via MCP_ALLOWED_HOSTS (CSV, hors repo).
 # Sans cette var (ex. dev local) → protection désactivée : on s'appuie sur Traefik + bearer.
@@ -153,6 +161,16 @@ def schema(name: str) -> str:
     """DDL réel (CREATE TABLE) d'une table depuis les snapshots de schéma : types de
     colonnes exacts, clés, index. Complémentaire des contrats ODCS (usage/unités)."""
     return _traced("schema", {"name": name}, lambda: _safe(_tb.schema, name))
+
+
+@mcp.tool()
+def meteofrance_catalog(api: str = "", topic: str = "contract", probe: bool = False) -> str:
+    """Catalogue de référence des APIs Météo-France : contrat d'URL (host/context/auth/quirks),
+    SCHÉMA de données (champs/paramètres + unités — DPObs en SI brut : Kelvin/Pascal), et probe
+    de disponibilité. `api` vide = vue d'ensemble ; topic=contract|schema|all ; probe nécessite
+    MF_PROBE_ENABLED + credentials. Complémentaire de `schema` (DDL des tables persistées)."""
+    return _traced("meteofrance_catalog", {"api": api, "topic": topic, "probe": probe},
+                   lambda: _safe(_tb.meteofrance_catalog, api, topic, probe))
 
 
 @mcp.tool()

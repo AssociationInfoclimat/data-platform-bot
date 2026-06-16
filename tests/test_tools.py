@@ -61,7 +61,7 @@ def test_dispatch_grep_redacts_secrets(snapshot):
 def test_schemas_shape():
     names = {t["name"] for t in SCHEMAS}
     assert names == {"read_file", "grep", "lineage", "kestra_recent", "volumetrie",
-                     "schema", "search_code"}
+                     "schema", "search_code", "meteofrance_catalog"}
 
 
 def test_search_code_disabled_by_default(tmp_path, monkeypatch):

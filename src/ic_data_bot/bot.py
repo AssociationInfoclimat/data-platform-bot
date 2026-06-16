@@ -303,8 +303,13 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
         ]
         if cid
     }
+    meteofrance = None
+    if cfg.meteofrance_application_id:
+        from .meteofrance_api import MeteoFranceAuth
+        meteofrance = MeteoFranceAuth(cfg.meteofrance_application_id)
     toolbox = ToolBox(snapshot, max_bytes=cfg.tool_read_max_bytes,
-                      kestra_log=kestra_log if kestra_channels else None)
+                      kestra_log=kestra_log if kestra_channels else None,
+                      meteofrance=meteofrance)
 
     if cfg.provider == "mistral":
         from mistralai.client import Mistral

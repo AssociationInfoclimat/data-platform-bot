@@ -300,15 +300,51 @@ SCHEMAS = [
             "required": ["name"],
         },
     },
+    {
+        "name": "meteofrance_catalog",
+        "description": (
+            "Catalogue de référence des APIs Météo-France (DPObs, DPPaquetObs, DPRadar, "
+            "AROME WCS/Paquets, AROME-OM, ARPEGE, AROME-PI, PIAF, archives climato data.gouv). "
+            "Répond SANS re-deviner les endpoints : contrat d'URL (host/context/auth/quirks), "
+            "SCHÉMA de données de l'API (champs/paramètres renvoyés avec types et UNITÉS), et "
+            "probe de disponibilité. Appelle-le pour « quelle est l'URL/l'auth de l'API X », "
+            "« quels champs/paramètres renvoie l'API X, dans quelles unités », « est-ce servi / "
+            "suis-je abonné ». ATTENTION : les réponses DPObs/DPPaquetObs sont en UNITÉS SI BRUTES "
+            "(Kelvin, Pascal). Complémentaire du tool `schema` (DDL des tables PERSISTÉES, unités "
+            "converties) : pour une API MF utilise CET outil, pour une table de la base utilise `schema`."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "api": {
+                    "type": "string",
+                    "description": "Id ou fragment d'API — ex. 'DPObs', 'arome-paquets', 'piaf'. Vide = vue d'ensemble.",
+                },
+                "topic": {
+                    "type": "string",
+                    "enum": ["contract", "schema", "all"],
+                    "description": "contract = URL/quirks (défaut) ; schema = champs/unités ; all = les deux.",
+                },
+                "probe": {
+                    "type": "boolean",
+                    "description": "Si vrai, teste la disponibilité live de l'endpoint (nécessite les credentials MF).",
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
 class ToolBox:
     def __init__(self, root: Path, max_bytes: int = 60_000, kestra_log=None, public: bool = False,
-                 secret_scrub=None):
+                 secret_scrub=None, meteofrance=None):
         self.root = Path(root).resolve()
         self.max_bytes = max_bytes
         self.kestra_log = kestra_log
+        # Client OAuth2 Météo-France (probe de disponibilité). None = probe désactivé
+        # (le catalogue/schéma reste consultable sans credentials). Cf. meteofrance_api.
+        self.meteofrance = meteofrance
         # Mode public (serveur MCP exposé) : interdit l'overlay confidentiel _ops/
         # (IP/hosts internes) dans read_file/grep/lineage. Défaut False = bot inchangé.
         self.public = public
@@ -588,6 +624,29 @@ class ToolBox:
             out = self.secret_scrub(out)
         return out
 
+    def meteofrance_catalog(self, api: str = "", topic: str = "contract", probe: bool = False) -> str:
+        from . import meteofrance_catalog as cat
+
+        api = (api or "").strip()
+        if not api:
+            return cat.overview()
+        entry = cat.find(api)
+        if entry is None:
+            return cat.not_found(api)
+        if probe:
+            if self.meteofrance is None:
+                raise ToolError(
+                    "Probe Météo-France indisponible : METEOFRANCE_APPLICATION_ID non "
+                    "configuré sur ce déploiement (le contrat et le schéma restent consultables)."
+                )
+            return cat.render_probe(entry, self.meteofrance)
+        topic = (topic or "contract").lower()
+        if topic == "schema":
+            return cat.render_schema(entry)
+        if topic == "all":
+            return cat.render_contract(entry) + "\n\n" + cat.render_schema(entry)
+        return cat.render_contract(entry)
+
     def dispatch(self, name: str, tool_input: dict) -> str:
         # Point d'étranglement UNIQUE : toute sortie d'outil passe par redact_secrets avant
         # d'atteindre le modèle (read_file/grep ne caviardaient rien auparavant — fuite).
@@ -613,4 +672,10 @@ class ToolBox:
             if self.kestra_log is None:
                 raise ToolError("Événements Kestra non configurés sur ce déploiement.")
             return self.kestra_log.recent(tool_input.get("query") or "")
+        if name == "meteofrance_catalog":
+            return self.meteofrance_catalog(
+                tool_input.get("api") or "",
+                tool_input.get("topic") or "contract",
+                bool(tool_input.get("probe")),
+            )
         raise ToolError(f"Outil inconnu : {name}")
