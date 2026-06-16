@@ -144,6 +144,59 @@ def test_prompt_cache_key_stable_and_passed():
     assert kw["prompt_cache_key"] == _cache_key("persona\n\nnoyau")
 
 
+def test_chat_retry_on_429_then_success(monkeypatch):
+    """Un 429 transitoire est retenté (backoff), puis l'appel réussit — pas d'erreur visible."""
+    monkeypatch.setattr("ic_data_bot.mistral.time.sleep", lambda *_: None)
+    n = {"c": 0}
+
+    class _Flaky:
+        def __init__(self): self.kwargs = []
+        def complete(self, **kw):
+            self.kwargs.append(kw); n["c"] += 1
+            if n["c"] == 1:
+                raise RuntimeError("API error occurred: Status 429. Body: rate_limited")
+            return _resp("stop", _msg("ok après retry"), _usage(1, 1))
+
+    client = SimpleNamespace(chat=_Flaky())
+    agent = MistralAgent(client, "m", 100, SYS, _Box())
+    res = agent.answer("q", [])
+    assert res.text == "ok après retry"
+    assert n["c"] == 2  # 1 échec 429 + 1 succès
+
+
+def test_chat_persistent_429_raises_ratelimited(monkeypatch):
+    """429 persistant après retries → RateLimitedError (mappé en message « réessaie » côté bot)."""
+    import pytest
+    from ic_data_bot.tools import RateLimitedError
+    monkeypatch.setattr("ic_data_bot.mistral.time.sleep", lambda *_: None)
+    monkeypatch.setattr("ic_data_bot.mistral._MAX_429_RETRIES", 2)
+
+    class _Always429:
+        def complete(self, **kw):
+            raise RuntimeError("Status 429 rate_limited")
+
+    agent = MistralAgent(SimpleNamespace(chat=_Always429()), "m", 100, SYS, _Box())
+    with pytest.raises(RateLimitedError):
+        agent.answer("q", [])
+
+
+def test_non_429_error_not_retried(monkeypatch):
+    """Une erreur NON-429 n'est pas retentée (remonte telle quelle)."""
+    import pytest
+    monkeypatch.setattr("ic_data_bot.mistral.time.sleep", lambda *_: None)
+    n = {"c": 0}
+
+    class _Boom:
+        def complete(self, **kw):
+            n["c"] += 1
+            raise ValueError("bad request 400")
+
+    agent = MistralAgent(SimpleNamespace(chat=_Boom()), "m", 100, SYS, _Box())
+    with pytest.raises(ValueError):
+        agent.answer("q", [])
+    assert n["c"] == 1  # aucun retry
+
+
 def test_think_tags_stripped():
     from ic_data_bot.mistral import _text_of
     # raisonnement en clair retiré, réponse conservée

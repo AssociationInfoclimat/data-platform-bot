@@ -23,11 +23,12 @@ from .github_issues import close_issue, contains_internal_details, create_issue,
 from .guardrails import DailyBudget, RateLimiter, is_allowed_channel
 from .kestra_events import KestraEventLog
 from .telemetry import make_langfuse, redact, register_prompt
-from .tools import ToolBox, redact_secrets
+from .tools import RateLimitedError, ToolBox, redact_secrets
 
 RATE_LIMITED_MSG = "Tu as posé trop de questions d'un coup, réessaie dans un instant. 🙏"
 NO_BUDGET_MSG = "Le budget quotidien du bot est atteint, réessaie demain. 💤"
 ERROR_MSG = "J'ai rencontré un souci technique en interrogeant le modèle, réessaie dans un moment. ⚙️"
+MODEL_BUSY_MSG = "Le service de modèle est très sollicité à l'instant, réessaie dans un moment. 🙏"
 
 # Marqueurs posés par le caviardage (tools.redact_secrets / secret_guard).
 _REDACTION_MARKERS = ("‹secret-rédacté›", "‹clé-privée-rédactée›")
@@ -246,6 +247,11 @@ class BotApp:
                     gen.update(output=redact(result.text, self.redact),
                                usage_details={"total": result.tokens},
                                metadata={"iterations": result.iterations})
+        except RateLimitedError as exc:  # 429 fournisseur persistant → invite à réessayer
+            self._log(user=user_id, status="model_busy", q_chars=len(question),
+                      model=model,
+                      dur_s=round(time.monotonic() - t0, 2), error="RateLimited")
+            return MODEL_BUSY_MSG
         except Exception as exc:  # ne jamais crasher le bot sur une erreur d'API/outil
             self._log(user=user_id, status="error", q_chars=len(question),
                       model=model,

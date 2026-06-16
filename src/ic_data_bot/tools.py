@@ -2,9 +2,40 @@ from __future__ import annotations
 
 import os
 import re
+import threading
+import time
 from pathlib import Path
 
 MAX_GREP_MATCHES = 50
+
+# ── Throttle global des appels à l'API Mistral (chat ET embeddings) ──────────
+# mistral-small-2603 limite à ~0,83 req/s (~50/min). La boucle d'outils
+# (tool_choice="any") ET les embeddings de search_code (codestral-embed) tapent le
+# MÊME quota de compte → on les espace via un verrou partagé UNIQUE. Le throttle vit
+# ici (et non dans mistral.py) pour que search_code l'appelle sans import circulaire.
+_MISTRAL_MIN_INTERVAL_S = float(os.environ.get("MISTRAL_MIN_INTERVAL_S", "1.3"))
+_throttle_lock = threading.Lock()
+_last_mistral_call = [0.0]
+
+
+def mistral_throttle() -> None:
+    """Garantit un espacement minimal entre deux appels Mistral, tous types confondus."""
+    with _throttle_lock:
+        wait = _MISTRAL_MIN_INTERVAL_S - (time.monotonic() - _last_mistral_call[0])
+        if wait > 0:
+            time.sleep(wait)
+        _last_mistral_call[0] = time.monotonic()
+
+
+class RateLimitedError(Exception):
+    """Plafond de débit du fournisseur (HTTP 429) persistant après retries — distinct
+    d'une vraie panne : l'appelant peut inviter l'utilisateur à réessayer."""
+
+
+def is_rate_limit_error(exc: Exception) -> bool:
+    """Détecte un 429 quel que soit le SDK (Mistral SDKError, Anthropic, …)."""
+    s = str(exc).lower()
+    return "429" in s or "rate_limit" in s or "rate limit" in s
 
 # ── Caviardage de secrets ───────────────────────────────────────────────────
 # Le code legacy indexé par search_code contient des secrets en dur (mots de passe,
@@ -536,6 +567,7 @@ class ToolBox:
                             "(définir CODE_INDEX_TOOLS_DIR vers data-platform/tools).")
         try:
             k = max(1, min(int(k or 6), 20))
+            mistral_throttle()  # l'embedding codestral-embed de la requête tape le quota Mistral
             results = _search(query, k=k, repos=[repo] if repo else None)
         except Exception as exc:  # noqa: BLE001 — surface l'erreur à l'agent
             raise ToolError(f"Recherche de code impossible : {type(exc).__name__}: {exc}")

@@ -106,6 +106,25 @@ async def test_process_handles_agent_error():
     assert app.history.get("th1") == [] # pas de tour mémorisé
 
 
+class _RateLimitedAgent:
+    def answer(self, question, history):
+        from ic_data_bot.tools import RateLimitedError
+        raise RateLimitedError("API error occurred: Status 429")
+
+
+@pytest.mark.asyncio
+async def test_process_rate_limited_upstream_returns_busy_msg():
+    """Un 429 fournisseur (RateLimitedError) → message « réessaie », PAS « souci technique »."""
+    budget = _Budget()
+    app = BotApp(agent=_RateLimitedAgent(), rate_limiter=_RL(), budget=budget,
+                 history=ThreadHistory(2, 1000, clock=lambda: 0.0))
+    reply = await app.process(user_id="u1", thread_id="th1", question="q")
+    assert "réessaie" in reply.lower()
+    assert "souci technique" not in reply.lower()
+    assert budget.added == 0             # rien décompté
+    assert app.history.get("th1") == []  # pas de tour mémorisé
+
+
 def _min_snapshot(tmp_path, marker):
     (tmp_path / "README.md").write_text(f"contenu {marker}\n")
     cat = tmp_path / "catalog"; cat.mkdir(exist_ok=True)

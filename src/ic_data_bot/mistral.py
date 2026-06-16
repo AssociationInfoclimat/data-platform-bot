@@ -4,30 +4,33 @@ import hashlib
 import json
 import os
 import re
-import threading
 import time
 
 from .claude import ISSUE_TITLE_PROMPT, MAX_TOOL_ITERATIONS, TITLE_PROMPT, AnswerResult, _tool_trace
-from .tools import SCHEMAS, ToolError
+from .tools import SCHEMAS, RateLimitedError, ToolError, is_rate_limit_error, mistral_throttle
 
-# Throttle global des appels à l'API Mistral. mistral-small-latest = alias
-# mistral-small-2603, dont le tier limite à ~0,83 req/s (~50/min), PAS 5/s. La boucle
-# d'outils (tool_choice="any" = 2+ appels/question) dépasse vite ce seuil → 429. On
-# garantit un espacement minimal entre TOUS les appels Mistral (verrou partagé). Défaut
-# 1,3 s ≈ 0,77 req/s, sous 0,83 avec marge ; réglable via MISTRAL_MIN_INTERVAL_S (à
-# remonter si tier plus bas, à baisser si tier supérieur). Impact bot négligeable
-# (questions séquentielles, exécuté dans un worker thread).
-_MISTRAL_MIN_INTERVAL_S = float(os.environ.get("MISTRAL_MIN_INTERVAL_S", "1.3"))
-_throttle_lock = threading.Lock()
-_last_call = [0.0]
+# Le throttle global (espacement min entre TOUS les appels Mistral — chat + embeddings
+# search_code) vit dans tools.py (partagé, sans import circulaire). Ici on ajoute le
+# retry/backoff sur 429 : malgré le throttle, une rafale (tool_choice=any + embeddings)
+# ou des utilisateurs concurrents peuvent franchir le plafond Mistral (~50/min). On
+# retente alors avec backoff plutôt que de renvoyer une erreur technique à l'utilisateur.
+_MAX_429_RETRIES = int(os.environ.get("MISTRAL_RETRY_429", "3"))
 
 
-def _throttle() -> None:
-    with _throttle_lock:
-        wait = _MISTRAL_MIN_INTERVAL_S - (time.monotonic() - _last_call[0])
-        if wait > 0:
-            time.sleep(wait)
-        _last_call[0] = time.monotonic()
+def _chat_with_retry(client, **kwargs):
+    """chat.complete throttlé, avec retry/backoff sur 429. Lève RateLimitedError si le
+    429 persiste après les retries (→ message « réessaie » côté bot, pas « erreur »)."""
+    for attempt in range(_MAX_429_RETRIES + 1):
+        mistral_throttle()
+        try:
+            return client.chat.complete(**kwargs)
+        except Exception as exc:
+            if is_rate_limit_error(exc):
+                if attempt < _MAX_429_RETRIES:
+                    time.sleep(2.0 * (attempt + 1))  # 2 s, 4 s, 6 s — le 429 Mistral se vide vite
+                    continue
+                raise RateLimitedError(str(exc)) from exc
+            raise
 
 # Les modèles de raisonnement (Magistral) peuvent émettre leur réflexion dans
 # <think>…</think> au sein du contenu. On la retire avant tout affichage Discord.
@@ -101,8 +104,8 @@ class MistralAgent:
 
     def thread_title(self, question: str, prompt: str = TITLE_PROMPT) -> AnswerResult:
         """Titre court (fil Discord, issue…) — appel minimal, sans outils."""
-        _throttle()
-        resp = self.client.chat.complete(
+        resp = _chat_with_retry(
+            self.client,
             model=self.model,
             max_tokens=30,
             messages=[
@@ -131,8 +134,8 @@ class MistralAgent:
             # donc à s'ancrer (read_file/grep/lineage) AVANT toute réponse, au niveau
             # API. Itérations suivantes en "auto" (sinon il rebouclerait sans pouvoir
             # produire la réponse finale).
-            _throttle()
-            resp = self.client.chat.complete(
+            resp = _chat_with_retry(
+                self.client,
                 model=self.model,
                 max_tokens=self.max_tokens,
                 messages=messages,
