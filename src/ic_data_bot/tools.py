@@ -11,23 +11,49 @@ MAX_GREP_MATCHES = 50
 # clés API, tokens, clés privées). On les masque DANS l'outil (déterministe) avant de
 # renvoyer le moindre extrait — on ne se fie pas au modèle pour s'auto-censurer.
 _S = "‹secret-rédacté›"
-_SECRET_KEY = (r"(?:passwd|password|pwd|mot[_ ]?de[_ ]?passe|mdp|secret|api[_-]?key|apikey|"
-               r"access[_-]?key|secret[_-]?key|auth[_-]?token|access[_-]?token|token|bearer|"
-               r"credentials?|private[_-]?key|salt|pepper|app[_-]?id|application[_-]?id|appid|"
+# Mots-clés « nom de secret ». Le mot-clé peut apparaître en SOUS-CHAÎNE d'un identifiant
+# (ex. USER_SALT1, MYSQL_API_KEY2) : les règles « clé nue » l'encadrent par [A-Za-z0-9_]* —
+# d'où l'absence ici de fragments trop fréquents (auth/sign nus) qui masqueraient `author`,
+# `assignment`, etc. Les secrets nommés ainsi (INT_AUTH_API…) sont rattrapés par la règle
+# « valeur à haute entropie » plus bas, fondée sur la VALEUR, pas le nom.
+_SECRET_KEY = (r"(?:passphrase|passwd|password|pwd|mot[_ ]?de[_ ]?passe|mdp|secret|"
+               r"api[_-]?key|apikey|access[_-]?key|secret[_-]?key|auth[_-]?token|auth[_-]?key|"
+               r"access[_-]?token|oauth|token|bearer|credentials?|private[_-]?key|salt|pepper|"
+               r"nonce|cipher|signature|app[_-]?id|application[_-]?id|appid|"
                r"client[_-]?id|client[_-]?secret|consumer[_-]?key|consumer[_-]?secret|"
                r"signing[_-]?key|hmac[_-]?key|license[_-]?key|encryption[_-]?key|crypt[_-]?key)")
-_STRONG_KEY = (r"(?:passwd|password|pwd|mdp|secret|api[_-]?key|apikey|access[_-]?key|"
-               r"secret[_-]?key|private[_-]?key|credentials?|salt|application[_-]?id|app[_-]?id|"
-               r"client[_-]?secret|consumer[_-]?secret|encryption[_-]?key|crypt[_-]?key)")
+_STRONG_KEY = (r"(?:passphrase|passwd|password|pwd|mdp|secret|api[_-]?key|apikey|access[_-]?key|"
+               r"secret[_-]?key|auth[_-]?key|private[_-]?key|credentials?|salt|application[_-]?id|"
+               r"app[_-]?id|client[_-]?secret|consumer[_-]?secret|encryption[_-]?key|crypt[_-]?key)")
+
+# Valeur quotée « qui ressemble à un secret » indépendamment du nom de la constante : longue
+# chaîne sans espace/séparateur de chemin, casse mixte ET un chiffre/symbole. Couvre les
+# secrets aux noms exotiques (INT_AUTH_API='Fq3@kPx7Rmn'). Exclut URLs, chemins, nombres,
+# mots tout-en-majuscules (enum), identifiants CamelCase sans chiffre.
+_ENTROPY_RX = re.compile(r"""((?:=>|[:=])\s*)(['"])([^'"\n]{12,})\2""")
+_ENTROPY_CHARSET = re.compile(r"[A-Za-z0-9+/=_@!#$%^&*\-]{12,}\Z")
+
+
+def _redact_entropy(m: "re.Match") -> str:
+    val = m.group(3)
+    if (_ENTROPY_CHARSET.match(val)
+            and re.search(r"[a-z]", val) and re.search(r"[A-Z]", val)
+            and re.search(r"[0-9+/=_@!#$%^&*\-]", val)):
+        return f"{m.group(1)}{m.group(2)}{_S}{m.group(2)}"
+    return m.group(0)
+
+
 _SECRET_RULES = [
     # define('XXX_PASSWORD', 'valeur') / define("API_KEY", "valeur")  (PHP)
     (re.compile(r"""(define\s*\(\s*['"][^'"]*(?:pass|secret|key|token|pwd|mdp|cred)[^'"]*['"]\s*,\s*['"])[^'"]{2,}(['"])""", re.I), r"\1" + _S + r"\2"),
     # clé quotée : 'password' => 'valeur'  |  "api_key": "valeur"
     (re.compile(r"""((['"])""" + _SECRET_KEY + r"""\2\s*(?:=>|:)\s*(['"]))[^'"\n]{2,}(['"])""", re.I), r"\1" + _S + r"\4"),
-    # clé nue, valeur quotée : password = 'valeur' | token: "valeur" (préfixe DB_/MYSQL_ OK)
-    (re.compile(r"""((?<![A-Za-z])""" + _SECRET_KEY + r"""\s*(?:=>|[:=])\s*(['"]))[^'"\n]{2,}\2""", re.I), r"\1" + _S + r"\2"),
-    # clé forte, valeur nue (env/.ini) : DB_PASSWORD=xxxx
-    (re.compile(r"""((?<![A-Za-z])""" + _STRONG_KEY + r"""\s*[:=]\s*)[^\s"'`,;)]{5,}""", re.I), r"\1" + _S),
+    # clé nue, valeur quotée : password = 'valeur' | USER_SALT1 = '...' (mot-clé en sous-chaîne ; préfixe DB_/MYSQL_ OK)
+    (re.compile(r"""((?<![A-Za-z0-9_])[A-Za-z0-9_]*""" + _SECRET_KEY + r"""[A-Za-z0-9_]*\s*(?:=>|[:=])\s*(['"]))[^'"\n]{2,}\2""", re.I), r"\1" + _S + r"\2"),
+    # clé forte, valeur nue (env/.ini) : DB_PASSWORD=xxxx | USER_SALT1=xxxx
+    (re.compile(r"""((?<![A-Za-z0-9_])[A-Za-z0-9_]*""" + _STRONG_KEY + r"""[A-Za-z0-9_]*\s*[:=]\s*)[^\s"'`,;)]{5,}""", re.I), r"\1" + _S),
+    # valeur quotée à haute entropie (nom de constante quelconque)
+    (_ENTROPY_RX, _redact_entropy),
     # identifiants dans une URL/DSN : scheme://user:motdepasse@host
     (re.compile(r"([a-zA-Z][\w+.\-]*://[^\s:@/]+:)[^\s@/]{2,}(@)"), r"\1" + _S + r"\2"),
     # préfixes de jetons connus
@@ -493,6 +519,13 @@ class ToolBox:
         return out
 
     def dispatch(self, name: str, tool_input: dict) -> str:
+        # Point d'étranglement UNIQUE : toute sortie d'outil passe par redact_secrets avant
+        # d'atteindre le modèle (read_file/grep ne caviardaient rien auparavant — fuite).
+        # redact_secrets est idempotent : la double passe sur search_code (déjà rédacté +
+        # scrub LLM) est sans effet.
+        return redact_secrets(self._dispatch(name, tool_input))
+
+    def _dispatch(self, name: str, tool_input: dict) -> str:
         if name == "read_file":
             return self.read_file(tool_input["path"])
         if name == "grep":

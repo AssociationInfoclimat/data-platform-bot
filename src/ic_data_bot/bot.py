@@ -23,11 +23,26 @@ from .github_issues import close_issue, contains_internal_details, create_issue,
 from .guardrails import DailyBudget, RateLimiter, is_allowed_channel
 from .kestra_events import KestraEventLog
 from .telemetry import make_langfuse, redact, register_prompt
-from .tools import ToolBox
+from .tools import ToolBox, redact_secrets
 
 RATE_LIMITED_MSG = "Tu as posé trop de questions d'un coup, réessaie dans un instant. 🙏"
 NO_BUDGET_MSG = "Le budget quotidien du bot est atteint, réessaie demain. 💤"
 ERROR_MSG = "J'ai rencontré un souci technique en interrogeant le modèle, réessaie dans un moment. ⚙️"
+
+# Marqueurs posés par le caviardage (tools.redact_secrets / secret_guard).
+_REDACTION_MARKERS = ("‹secret-rédacté›", "‹clé-privée-rédactée›")
+REDACTION_NOTICE = (
+    "\n\n> ⚠️ Des éléments sensibles ont été masqués (‹secret-rédacté›) pour raisons de "
+    "sécurité — ce n'est pas une erreur de ma part."
+)
+
+
+def with_redaction_notice(text: str) -> str:
+    """Ajoute un avis (une seule fois) si la réponse contient un marqueur de caviardage,
+    pour que l'utilisateur ne prenne pas le masquage pour un bug de réponse."""
+    if any(m in text for m in _REDACTION_MARKERS) and "pour raisons de sécurité" not in text:
+        return text + REDACTION_NOTICE
+    return text
 
 
 def should_respond(*, author_is_bot: bool, channel_id: int, allowed_channel_id: int,
@@ -236,14 +251,19 @@ class BotApp:
                       model=model,
                       dur_s=round(time.monotonic() - t0, 2), error=type(exc).__name__)
             return ERROR_MSG
+        # Garde-fou de sortie : ultime passe déterministe avant que la réponse ne parte
+        # vers Discord (et soit mémorisée). Filet au cas où un secret aurait transité malgré
+        # le caviardage côté outils. redact_secrets est idempotent.
+        scrubbed = redact_secrets(result.text)
+        had_secret = any(m in scrubbed for m in _REDACTION_MARKERS)
         self.budget.add(result.tokens)
-        self.history.append(thread_id, question, result.text)
+        self.history.append(thread_id, question, scrubbed)
         self._log(user=user_id, status="ok", q_chars=len(question),
                   model=getattr(agent, "model", "?"),
                   dur_s=round(time.monotonic() - t0, 2), tokens=result.tokens,
-                  iters=result.iterations, reply_chars=len(result.text),
-                  budget_left=self.budget.remaining())
-        return result.text
+                  iters=result.iterations, reply_chars=len(scrubbed),
+                  redacted=had_secret, budget_left=self.budget.remaining())
+        return with_redaction_notice(scrubbed)
 
 
 def run() -> None:  # pragma: no cover (point d'entrée I/O)

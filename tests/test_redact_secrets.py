@@ -21,7 +21,26 @@ SECRETS = [
     ('const SVC_APPLICATION_ID = "abc123APPID";', "abc123APPID"),
     ("$client_secret = 'oauthS3cr3tVal';", "oauthS3cr3tVal"),
     ("CONSUMER_SECRET=tw1tterSecretXYZ", "tw1tterSecretXYZ"),
+    # FUITES CONSTATÉES (valeurs FACTICES, même structure que les vraies) :
+    # - salt à suffixe chiffré (USER_SALT1) que l'ancien regex laissait passer
+    ('const USER_SALT1 = "Mxk3SaltValAaZ9";', "Mxk3SaltValAaZ9"),
+    ('const USER_UNIQUE_SALT = "Qp7RtsVbnHk2Lm";', "Qp7RtsVbnHk2Lm"),
+    # - constantes AUTH dont le NOM n'est pas un mot-clé → rattrapées par la haute entropie
+    ("const INT_AUTH_API = 'Zx9KdMq2Lp7Tvb';", "Zx9KdMq2Lp7Tvb"),
+    ("const EXT_AUTH1 = 'Bc4HmnQ8RsTuWx';", "Bc4HmnQ8RsTuWx"),
 ]
+
+
+def test_no_false_positive_on_non_secret_constants():
+    """Constantes légitimes à NE PAS caviarder (URLs, licences, versions, statuts)."""
+    for benign in [
+        "const URL = 'https://example.vercel.app';",
+        "const COMMERCIAL_LICENSE = 1;",
+        "const ETALAB_LICENSE = 0;",
+        "$status = 'actif';",
+        "const VERSION = '2024.05.01';",
+    ]:
+        assert redact_secrets(benign) == benign, f"faux positif: {benign!r}"
 
 
 def test_secrets_are_masked():
