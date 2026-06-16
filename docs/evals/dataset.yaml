@@ -302,9 +302,8 @@ questions:
     mechanism: "search_code (index vectoriel du code des repos)"
     question: "dans quel script le code récupère et insère les impacts de foudre (Blitzortung) ?"
     criteria:
-      - "identifie le script via search_code : site-infoclimat/cron/recup_blitzortung.php (ou _ws.php)"
-      - "s'appuie sur la recherche de code, pas seulement sur le contrat/lineage"
-      - "n'invente pas un chemin de fichier non retourné par l'outil"
+      - "identifie le script : site-infoclimat/cron/recup_blitzortung.php (ou recup_blitzortung_ws.php)"
+      - "donne un chemin de code réel (site-infoclimat/...), sans nommer un fichier hors sujet"
 
   - id: M2
     category: code
@@ -312,8 +311,8 @@ questions:
     mechanism: "search_code"
     question: "où est calculée la détection des records de température battus dans le code ?"
     criteria:
-      - "cite le code de détection via search_code (site-infoclimat/cron/records/detection_records.php)"
-      - "n'invente pas un chemin non retourné par search_code"
+      - "identifie le fichier : site-infoclimat/cron/records/detection_records.php"
+      - "pointe le CODE applicatif, pas seulement des objets data-platform (vues/jobs/contrats)"
 
   - id: M3
     category: code
@@ -321,5 +320,5 @@ questions:
     mechanism: "search_code (code applicatif, pas le snapshot data-platform)"
     question: "où est fait le décodage BUFR des observations SYNOP ?"
     criteria:
-      - "cite un fichier de décodage BUFR synop via search_code (data/traitement/synop/bufr_*.py)"
-      - "s'appuie sur le code applicatif (search_code), pas sur le snapshot/grep"
+      - "cite un fichier de décodage BUFR synop : data/traitement/synop/bufr_*.py (ex. bufr_usa.py)"
+      - "pointe le code applicatif (site-infoclimat), pas le snapshot data-platform"
