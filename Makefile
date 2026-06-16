@@ -1,14 +1,15 @@
-SNAPSHOT_SRC ?= ../site-infoclimat/data-platform
 SNAPSHOT_DST ?= ./snapshot
+REPO_URL ?= https://github.com/AssociationInfoclimat/data-platform.git
+REPO_BRANCH ?= main
 
 .PHONY: sync-snapshot run test
 
+# Clone / met à jour le snapshot du corpus PUBLIC data-platform dans $(SNAPSHOT_DST),
+# via le même mécanisme `gitsync` qu'en prod (clone anonyme, fetch+reset). Pour le bot
+# local : pointer DATAPLATFORM_SNAPSHOT_DIR sur $(SNAPSHOT_DST).
 sync-snapshot:
-	rm -rf $(SNAPSHOT_DST)
-	mkdir -p $(SNAPSHOT_DST)
-	cp -R $(SNAPSHOT_SRC)/. $(SNAPSHOT_DST)/
-	@mkdir -p $(SNAPSHOT_DST)/migration-data
-	@cp ../site-infoclimat/migration-data/schema-directeur-data.md $(SNAPSHOT_DST)/migration-data/ 2>/dev/null || true
+	CLONE_DIR=$(SNAPSHOT_DST) REPO_URL=$(REPO_URL) REPO_BRANCH=$(REPO_BRANCH) \
+		uv run python -m ic_data_bot.gitsync
 	@echo "Snapshot synchronisé dans $(SNAPSHOT_DST)"
 
 run:

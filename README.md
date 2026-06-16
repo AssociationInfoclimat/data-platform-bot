@@ -6,13 +6,18 @@ inventaire, migration TimescaleDB), ancré sur un snapshot figé de `data-platfo
 
 ## Mise en route (local)
 
-1. `cp .env.example .env` puis renseigner `DISCORD_BOT_TOKEN`, `ANTHROPIC_API_KEY`,
-   `ALLOWED_CHANNEL_ID`.
-2. `make sync-snapshot` — copie `../site-infoclimat/data-platform/` vers `./snapshot/`.
-3. `uv sync`
+1. `cp .env.example .env` puis renseigner les secrets : `DISCORD_BOT_TOKEN`,
+   `ALLOWED_CHANNEL_ID` et la clé du provider (`ANTHROPIC_API_KEY` ou `MISTRAL_API_KEY`).
+   En local, pointer le snapshot sur un dossier local : `DATAPLATFORM_SNAPSHOT_DIR=./snapshot`
+   (les chemins `/data/...` du `.env.example` sont pour le conteneur).
+2. `uv sync`
+3. `make sync-snapshot` — clone/met à jour le corpus **public** `data-platform` dans
+   `./snapshot` (même mécanisme `gitsync` qu'en prod ; `REPO_URL` est déjà renseigné dans
+   `.env.example`). *Alternative* : pointer `DATAPLATFORM_SNAPSHOT_DIR` vers un clone local
+   existant de `data-platform`.
 4. `make run`
 
-Resync du contexte quand la branche `feat/data-platform-bootstrap` évolue : `make sync-snapshot`.
+Resync du corpus à tout moment : `make sync-snapshot`.
 
 ## Tests
 
