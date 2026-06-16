@@ -29,6 +29,14 @@ REFRESH_SECONDS = int(os.environ.get("MCP_REFRESH_SECONDS") or "3600")
 
 # ToolBox en MODE PUBLIC : read_file/grep/lineage refusent _ops/ (IP/hosts internes).
 _tb = ToolBox(Path(SNAPSHOT_DIR), public=True)
+# Guardrail modèle anti-fuite : la sortie de search_code (code legacy avec secrets en dur)
+# passe par le regex puis par un petit LLM. Provider/clé depuis l'env partagé du conteneur.
+from .secret_guard import make_llm_scrubber  # noqa: E402
+_tb.secret_scrub = make_llm_scrubber(
+    os.environ.get("PROVIDER") or ("mistral" if os.environ.get("MISTRAL_API_KEY") else "anthropic"),
+    anthropic_key=os.environ.get("ANTHROPIC_API_KEY") or "",
+    mistral_key=os.environ.get("MISTRAL_API_KEY") or "",
+)
 
 # Protection anti-DNS-rebinding du SDK (validation du Host) : derrière un reverse-proxy,
 # le Host devient le domaine public. On l'autorise via MCP_ALLOWED_HOSTS (CSV, hors repo).

@@ -294,6 +294,14 @@ def run() -> None:  # pragma: no cover (point d'entrée I/O)
         client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
         agent = DataManagerAgent(client, cfg.model, cfg.max_tokens, system_blocks, toolbox)
         reasoning_agent = agent  # pas de modèle de raisonnement distinct côté Anthropic
+
+    # Guardrail modèle anti-fuite de secrets sur la sortie de search_code (le code legacy
+    # indexé contient des secrets en dur). Couche sémantique derrière le caviardage regex.
+    from .secret_guard import make_llm_scrubber
+    toolbox.secret_scrub = make_llm_scrubber(
+        cfg.provider, anthropic_key=cfg.anthropic_api_key, mistral_key=cfg.mistral_api_key)
+    print(f"[secret-guard] scrub LLM {'actif' if toolbox.secret_scrub else 'désactivé'}",
+          flush=True)
     reasoning_label = getattr(reasoning_agent, "model", "?")
     print(f"[provider] {cfg.provider} — modèle {cfg.model} "
           f"(raisonnement : {reasoning_label})", flush=True)

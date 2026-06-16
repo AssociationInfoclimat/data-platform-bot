@@ -16,6 +16,11 @@ SECRETS = [
     ("url = 'mysql://root:r00tPassWd@dbhost/db'", "r00tPassWd"),
     (f"key {_SKANT} here", _SKANT),
     (f"tok {_GHP} x", _GHP),
+    # forme PHP `const NOM = "valeur";` (modèle des fuites salt / app id constatées)
+    ('const COOKIE_HASH_SALT = "Gk9zQ2pLm";', "Gk9zQ2pLm"),
+    ('const SVC_APPLICATION_ID = "abc123APPID";', "abc123APPID"),
+    ("$client_secret = 'oauthS3cr3tVal';", "oauthS3cr3tVal"),
+    ("CONSUMER_SECRET=tw1tterSecretXYZ", "tw1tterSecretXYZ"),
 ]
 
 
@@ -31,6 +36,17 @@ def test_private_key_block_masked():
     out = redact_secrets(blob)
     assert "secret" not in out and "MIIEv" not in out
     assert "‹clé-privée-rédactée›" in out
+
+
+def test_llm_scrubber_gating(monkeypatch):
+    from ic_data_bot.secret_guard import make_llm_scrubber
+    # désactivé explicitement → None même avec une clé
+    monkeypatch.setenv("CODE_SECRET_LLM_SCRUB", "0")
+    assert make_llm_scrubber("anthropic", anthropic_key="x") is None
+    # activé mais sans clé du provider → None (pas de crash)
+    monkeypatch.setenv("CODE_SECRET_LLM_SCRUB", "1")
+    assert make_llm_scrubber("anthropic", anthropic_key="") is None
+    assert make_llm_scrubber("mistral", mistral_key="") is None
 
 
 def test_no_false_positive_on_code_identifiers():

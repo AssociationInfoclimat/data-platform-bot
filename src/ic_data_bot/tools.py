@@ -13,9 +13,12 @@ MAX_GREP_MATCHES = 50
 _S = "‹secret-rédacté›"
 _SECRET_KEY = (r"(?:passwd|password|pwd|mot[_ ]?de[_ ]?passe|mdp|secret|api[_-]?key|apikey|"
                r"access[_-]?key|secret[_-]?key|auth[_-]?token|access[_-]?token|token|bearer|"
-               r"credentials?|private[_-]?key)")
+               r"credentials?|private[_-]?key|salt|pepper|app[_-]?id|application[_-]?id|appid|"
+               r"client[_-]?id|client[_-]?secret|consumer[_-]?key|consumer[_-]?secret|"
+               r"signing[_-]?key|hmac[_-]?key|license[_-]?key|encryption[_-]?key|crypt[_-]?key)")
 _STRONG_KEY = (r"(?:passwd|password|pwd|mdp|secret|api[_-]?key|apikey|access[_-]?key|"
-               r"secret[_-]?key|private[_-]?key|credentials?)")
+               r"secret[_-]?key|private[_-]?key|credentials?|salt|application[_-]?id|app[_-]?id|"
+               r"client[_-]?secret|consumer[_-]?secret|encryption[_-]?key|crypt[_-]?key)")
 _SECRET_RULES = [
     # define('XXX_PASSWORD', 'valeur') / define("API_KEY", "valeur")  (PHP)
     (re.compile(r"""(define\s*\(\s*['"][^'"]*(?:pass|secret|key|token|pwd|mdp|cred)[^'"]*['"]\s*,\s*['"])[^'"]{2,}(['"])""", re.I), r"\1" + _S + r"\2"),
@@ -207,13 +210,18 @@ SCHEMAS = [
 
 
 class ToolBox:
-    def __init__(self, root: Path, max_bytes: int = 60_000, kestra_log=None, public: bool = False):
+    def __init__(self, root: Path, max_bytes: int = 60_000, kestra_log=None, public: bool = False,
+                 secret_scrub=None):
         self.root = Path(root).resolve()
         self.max_bytes = max_bytes
         self.kestra_log = kestra_log
         # Mode public (serveur MCP exposé) : interdit l'overlay confidentiel _ops/
         # (IP/hosts internes) dans read_file/grep/lineage. Défaut False = bot inchangé.
         self.public = public
+        # Guardrail modèle optionnel (text->texte caviardé) appliqué à la SORTIE de
+        # search_code, après le caviardage regex. Filet sémantique pour les secrets aux
+        # noms exotiques que redact_secrets() ne connaît pas. Injecté par bot.py/mcp_server.py.
+        self.secret_scrub = secret_scrub
         self._ops_dir = (self.root / "_ops").resolve()
 
     def _is_ops(self, candidate: Path) -> bool:
@@ -477,7 +485,12 @@ class ToolBox:
         for r in results:
             snippet = redact_secrets("\n".join(r.text.splitlines()[:18]))
             blocks.append(f"### {r.location} ({r.lang}, distance {r.score:.3f})\n{snippet}")
-        return "\n\n".join(blocks)
+        out = "\n\n".join(blocks)
+        # Filet sémantique : un petit LLM repère les secrets que le regex ignore (noms
+        # exotiques). Si indispo/erreur, on garde la sortie regex (jamais de fuite au-delà).
+        if self.secret_scrub:
+            out = self.secret_scrub(out)
+        return out
 
     def dispatch(self, name: str, tool_input: dict) -> str:
         if name == "read_file":
