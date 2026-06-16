@@ -1,9 +1,46 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 MAX_GREP_MATCHES = 50
+
+# ── Caviardage de secrets ───────────────────────────────────────────────────
+# Le code legacy indexé par search_code contient des secrets en dur (mots de passe,
+# clés API, tokens, clés privées). On les masque DANS l'outil (déterministe) avant de
+# renvoyer le moindre extrait — on ne se fie pas au modèle pour s'auto-censurer.
+_S = "‹secret-rédacté›"
+_SECRET_KEY = (r"(?:passwd|password|pwd|mot[_ ]?de[_ ]?passe|mdp|secret|api[_-]?key|apikey|"
+               r"access[_-]?key|secret[_-]?key|auth[_-]?token|access[_-]?token|token|bearer|"
+               r"credentials?|private[_-]?key)")
+_STRONG_KEY = (r"(?:passwd|password|pwd|mdp|secret|api[_-]?key|apikey|access[_-]?key|"
+               r"secret[_-]?key|private[_-]?key|credentials?)")
+_SECRET_RULES = [
+    # define('XXX_PASSWORD', 'valeur') / define("API_KEY", "valeur")  (PHP)
+    (re.compile(r"""(define\s*\(\s*['"][^'"]*(?:pass|secret|key|token|pwd|mdp|cred)[^'"]*['"]\s*,\s*['"])[^'"]{2,}(['"])""", re.I), r"\1" + _S + r"\2"),
+    # clé quotée : 'password' => 'valeur'  |  "api_key": "valeur"
+    (re.compile(r"""((['"])""" + _SECRET_KEY + r"""\2\s*(?:=>|:)\s*(['"]))[^'"\n]{2,}(['"])""", re.I), r"\1" + _S + r"\4"),
+    # clé nue, valeur quotée : password = 'valeur' | token: "valeur" (préfixe DB_/MYSQL_ OK)
+    (re.compile(r"""((?<![A-Za-z])""" + _SECRET_KEY + r"""\s*(?:=>|[:=])\s*(['"]))[^'"\n]{2,}\2""", re.I), r"\1" + _S + r"\2"),
+    # clé forte, valeur nue (env/.ini) : DB_PASSWORD=xxxx
+    (re.compile(r"""((?<![A-Za-z])""" + _STRONG_KEY + r"""\s*[:=]\s*)[^\s"'`,;)]{5,}""", re.I), r"\1" + _S),
+    # identifiants dans une URL/DSN : scheme://user:motdepasse@host
+    (re.compile(r"([a-zA-Z][\w+.\-]*://[^\s:@/]+:)[^\s@/]{2,}(@)"), r"\1" + _S + r"\2"),
+    # préfixes de jetons connus
+    (re.compile(r"\b(?:sk-ant-[\w-]{6,}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_\w{20,}|xox[baprs]-[\w-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{20,})\b"), _S),
+    # blocs de clés privées PEM
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S), "‹clé-privée-rédactée›"),
+]
+
+
+def redact_secrets(text: str) -> str:
+    """Masque les secrets en dur (mots de passe, clés, tokens, clés privées) d'un extrait."""
+    if not text:
+        return text
+    for rx, repl in _SECRET_RULES:
+        text = rx.sub(repl, text)
+    return text
 
 # Outil lineage : registres structurés à joindre, et bornes pour contenir le
 # coût en tokens (le résultat part dans les messages, donc hors cache).
@@ -438,7 +475,7 @@ class ToolBox:
             return "Aucun extrait pertinent (index non construit pour ce périmètre ?)."
         blocks = []
         for r in results:
-            snippet = "\n".join(r.text.splitlines()[:18])
+            snippet = redact_secrets("\n".join(r.text.splitlines()[:18]))
             blocks.append(f"### {r.location} ({r.lang}, distance {r.score:.3f})\n{snippet}")
         return "\n\n".join(blocks)
 
