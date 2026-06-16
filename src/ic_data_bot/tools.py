@@ -268,7 +268,10 @@ SCHEMAS = [
             "est implémenté X dans le code », retrouver la fonction ou le fichier qui fait "
             "Y, par le SENS et non le mot-clé. Complémentaire de grep (lexical, limité au "
             "snapshot data-platform) : ici c'est le code applicatif de tous les repos. "
-            "Renvoie les extraits les plus proches avec repo/chemin:lignes."
+            "Recherche HYBRIDE (sémantique + lexicale BM25, fusionnées) sur des chunks "
+            "contextualisés, avec réécriture automatique de la requête : poser la question "
+            "telle quelle, sans la transformer en mots-clés. Renvoie les extraits les plus "
+            "pertinents avec repo/chemin:lignes."
         ),
         "input_schema": {
             "type": "object",
@@ -535,9 +538,10 @@ class ToolBox:
         return "\n\n".join(blocks)[: MAX_SCHEMA_CHARS * 2]
 
     def search_code(self, query: str, repo: str | None = None, k: int = 6) -> str:
-        """Recherche sémantique dans le code source (index vectoriel code_index de
-        data-platform/tools, réutilisé via search_code()). Le code applicatif vient de
-        repos PRIVÉS : refusé en mode public (serveur MCP) sauf opt-in CODE_INDEX_PUBLIC.
+        """Recherche hybride (sémantique + BM25) dans le code source, sur chunks
+        contextualisés et avec réécriture de requête (index code_index de data-platform/tools,
+        réutilisé via search_code()). Le code applicatif vient de repos PRIVÉS : refusé en
+        mode public (serveur MCP) sauf opt-in CODE_INDEX_PUBLIC.
 
         Interrupteur maître `CODE_INDEX_ENABLED` : désactivé par défaut. L'import de
         lancedb (back-end vectoriel) embarque du code natif AVX2 qui plante par SIGILL

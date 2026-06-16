@@ -179,8 +179,9 @@ _ci_on = lambda v: os.environ.get(v, "").lower() in ("1", "true", "yes")  # noqa
 if _ci_on("CODE_INDEX_ENABLED") and _ci_on("CODE_INDEX_PUBLIC"):
     @mcp.tool()
     def search_code(query: str, repo: str = "", k: int = 6) -> str:
-        """Recherche SÉMANTIQUE dans le code source des repos Infoclimat (index vectoriel
-        codestral-embed). Pour « où/comment est implémenté X » ; renvoie repo/chemin:lignes."""
+        """Recherche HYBRIDE (sémantique + lexicale BM25, fusionnées) dans le code source des
+        repos Infoclimat, sur des chunks contextualisés et avec réécriture automatique de la
+        requête. Pour « où/comment est implémenté X » ; renvoie repo/chemin:lignes."""
         return _traced("search_code", {"query": query, "repo": repo},
                        lambda: _safe(_tb.search_code, query, repo or None, k))
 
