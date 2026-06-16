@@ -164,6 +164,18 @@ def list_corpus(subdir: str = "") -> str:
     return _traced("list_corpus", {"subdir": subdir}, _do)
 
 
+# Recherche sémantique de code : exposée par le MCP PUBLIC uniquement sur opt-in
+# explicite (CODE_INDEX_PUBLIC) — le code applicatif vient de repos PRIVÉS. Le bot
+# Discord (interne) l'a toujours via tools.py. Nécessite l'index LanceDB + MISTRAL_API_KEY.
+if os.environ.get("CODE_INDEX_PUBLIC", "").lower() in ("1", "true", "yes"):
+    @mcp.tool()
+    def search_code(query: str, repo: str = "", k: int = 6) -> str:
+        """Recherche SÉMANTIQUE dans le code source des repos Infoclimat (index vectoriel
+        codestral-embed). Pour « où/comment est implémenté X » ; renvoie repo/chemin:lignes."""
+        return _traced("search_code", {"query": query, "repo": repo},
+                       lambda: _safe(_tb.search_code, query, repo or None, k))
+
+
 # ── Resource (lecture par URI) ──────────────────────────────────────────────
 @mcp.resource("dataplatform://{path}")
 def corpus_resource(path: str) -> str:

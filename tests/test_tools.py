@@ -41,7 +41,24 @@ def test_dispatch_unknown_tool_raises(snapshot):
 
 def test_schemas_shape():
     names = {t["name"] for t in SCHEMAS}
-    assert names == {"read_file", "grep", "lineage", "kestra_recent", "volumetrie", "schema"}
+    assert names == {"read_file", "grep", "lineage", "kestra_recent", "volumetrie",
+                     "schema", "search_code"}
+
+
+def test_search_code_refused_in_public_mode(tmp_path, monkeypatch):
+    """Mode public (serveur MCP) : la recherche de code (repos privés) est refusée
+    sans opt-in explicite CODE_INDEX_PUBLIC."""
+    monkeypatch.delenv("CODE_INDEX_PUBLIC", raising=False)
+    box = ToolBox(tmp_path, public=True)
+    with pytest.raises(ToolError):
+        box.search_code("où est le routing")
+
+
+def test_search_code_empty_query_rejected(tmp_path, monkeypatch):
+    monkeypatch.delenv("CODE_INDEX_PUBLIC", raising=False)
+    box = ToolBox(tmp_path, public=False)  # interne : pas de garde public
+    with pytest.raises(ToolError):
+        box.search_code("   ")
 
 
 def _lineage_snapshot(tmp_path):

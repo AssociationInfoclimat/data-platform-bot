@@ -129,6 +129,27 @@ SCHEMAS = [
         },
     },
     {
+        "name": "search_code",
+        "description": (
+            "Recherche SÉMANTIQUE dans le CODE SOURCE des repos Infoclimat "
+            "(site-infoclimat, infrapilot, modeles-ncl/php, python-climate-services, "
+            "data-platform…) via un index vectoriel codestral-embed. Pour « où / comment "
+            "est implémenté X dans le code », retrouver la fonction ou le fichier qui fait "
+            "Y, par le SENS et non le mot-clé. Complémentaire de grep (lexical, limité au "
+            "snapshot data-platform) : ici c'est le code applicatif de tous les repos. "
+            "Renvoie les extraits les plus proches avec repo/chemin:lignes."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Question en langage naturel sur le code"},
+                "repo": {"type": "string", "description": "Limiter à un repo (ex. site-infoclimat) — optionnel"},
+                "k": {"type": "integer", "description": "Nombre d'extraits à renvoyer (défaut 6)"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "schema",
         "description": (
             "DDL RÉEL d'une table (CREATE TABLE) depuis les snapshots de schéma "
@@ -377,6 +398,41 @@ class ToolBox:
             return f"Aucun DDL pour « {name} » dans {', '.join(SCHEMA_FILES)} (vérifie le nom exact)."
         return "\n\n".join(blocks)[: MAX_SCHEMA_CHARS * 2]
 
+    def search_code(self, query: str, repo: str | None = None, k: int = 6) -> str:
+        """Recherche sémantique dans le code source (index vectoriel code_index de
+        data-platform/tools, réutilisé via search_code()). Le code applicatif vient de
+        repos PRIVÉS : refusé en mode public (serveur MCP) sauf opt-in CODE_INDEX_PUBLIC."""
+        if self.public and os.environ.get("CODE_INDEX_PUBLIC", "").lower() not in ("1", "true", "yes"):
+            raise ToolError("Recherche de code désactivée en mode public (code applicatif "
+                            "des repos privés non exposé).")
+        if not query or not query.strip():
+            raise ToolError("Requête vide.")
+        # Le module code_index vit dans data-platform/tools (présent dans le snapshot, ou
+        # via CODE_INDEX_TOOLS_DIR). L'index LanceDB et MISTRAL_API_KEY sont lus par
+        # code_index.config (CODE_INDEX_DIR, MISTRAL_API_KEY).
+        import sys
+
+        tools_dir = os.environ.get("CODE_INDEX_TOOLS_DIR") or str(self.root / "tools")
+        if tools_dir not in sys.path:
+            sys.path.insert(0, tools_dir)
+        try:
+            from code_index import search_code as _search
+        except ImportError:
+            raise ToolError("Index de code indisponible : module code_index introuvable "
+                            "(définir CODE_INDEX_TOOLS_DIR vers data-platform/tools).")
+        try:
+            k = max(1, min(int(k or 6), 20))
+            results = _search(query, k=k, repos=[repo] if repo else None)
+        except Exception as exc:  # noqa: BLE001 — surface l'erreur à l'agent
+            raise ToolError(f"Recherche de code impossible : {type(exc).__name__}: {exc}")
+        if not results:
+            return "Aucun extrait pertinent (index non construit pour ce périmètre ?)."
+        blocks = []
+        for r in results:
+            snippet = "\n".join(r.text.splitlines()[:18])
+            blocks.append(f"### {r.location} ({r.lang}, distance {r.score:.3f})\n{snippet}")
+        return "\n\n".join(blocks)
+
     def dispatch(self, name: str, tool_input: dict) -> str:
         if name == "read_file":
             return self.read_file(tool_input["path"])
@@ -388,6 +444,9 @@ class ToolBox:
             return self.volumetrie(tool_input["name"])
         if name == "schema":
             return self.schema(tool_input["name"])
+        if name == "search_code":
+            return self.search_code(tool_input["query"], tool_input.get("repo") or None,
+                                    int(tool_input.get("k") or 6))
         if name == "kestra_recent":
             if self.kestra_log is None:
                 raise ToolError("Événements Kestra non configurés sur ce déploiement.")
