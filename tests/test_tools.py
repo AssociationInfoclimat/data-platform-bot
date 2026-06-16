@@ -45,9 +45,19 @@ def test_schemas_shape():
                      "schema", "search_code"}
 
 
+def test_search_code_disabled_by_default(tmp_path, monkeypatch):
+    """Interrupteur maître : sans CODE_INDEX_ENABLED, l'outil refuse AVANT tout import
+    de lancedb (qui planterait par SIGILL sur un CPU sans AVX2)."""
+    monkeypatch.delenv("CODE_INDEX_ENABLED", raising=False)
+    box = ToolBox(tmp_path, public=False)
+    with pytest.raises(ToolError):
+        box.search_code("où est le routing")
+
+
 def test_search_code_refused_in_public_mode(tmp_path, monkeypatch):
     """Mode public (serveur MCP) : la recherche de code (repos privés) est refusée
-    sans opt-in explicite CODE_INDEX_PUBLIC."""
+    sans opt-in explicite CODE_INDEX_PUBLIC, même si l'outil est activé."""
+    monkeypatch.setenv("CODE_INDEX_ENABLED", "1")
     monkeypatch.delenv("CODE_INDEX_PUBLIC", raising=False)
     box = ToolBox(tmp_path, public=True)
     with pytest.raises(ToolError):
@@ -55,6 +65,7 @@ def test_search_code_refused_in_public_mode(tmp_path, monkeypatch):
 
 
 def test_search_code_empty_query_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODE_INDEX_ENABLED", "1")
     monkeypatch.delenv("CODE_INDEX_PUBLIC", raising=False)
     box = ToolBox(tmp_path, public=False)  # interne : pas de garde public
     with pytest.raises(ToolError):

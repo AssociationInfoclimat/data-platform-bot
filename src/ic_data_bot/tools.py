@@ -401,7 +401,16 @@ class ToolBox:
     def search_code(self, query: str, repo: str | None = None, k: int = 6) -> str:
         """Recherche sémantique dans le code source (index vectoriel code_index de
         data-platform/tools, réutilisé via search_code()). Le code applicatif vient de
-        repos PRIVÉS : refusé en mode public (serveur MCP) sauf opt-in CODE_INDEX_PUBLIC."""
+        repos PRIVÉS : refusé en mode public (serveur MCP) sauf opt-in CODE_INDEX_PUBLIC.
+
+        Interrupteur maître `CODE_INDEX_ENABLED` : désactivé par défaut. L'import de
+        lancedb (back-end vectoriel) embarque du code natif AVX2 qui plante par SIGILL
+        sur un CPU sans AVX2 (un signal NON rattrapable → crash du process). On
+        n'importe donc lancedb QUE si l'opérateur a activé le flag après avoir vérifié
+        que la plateforme le supporte."""
+        if os.environ.get("CODE_INDEX_ENABLED", "").lower() not in ("1", "true", "yes"):
+            raise ToolError("Recherche de code désactivée (CODE_INDEX_ENABLED non défini ; "
+                            "le back-end vectoriel requiert un CPU avec AVX2).")
         if self.public and os.environ.get("CODE_INDEX_PUBLIC", "").lower() not in ("1", "true", "yes"):
             raise ToolError("Recherche de code désactivée en mode public (code applicatif "
                             "des repos privés non exposé).")
