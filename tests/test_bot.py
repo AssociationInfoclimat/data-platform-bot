@@ -46,6 +46,36 @@ async def test_process_happy_path():
     assert app.budget.added == 42
     assert app.history.get("th1")  # tour mémorisé
 
+class _LeakyAgent:
+    """Agent dont la réponse contient encore un secret (cas où le caviardage côté outil
+    aurait été contourné) : le garde-fou de sortie doit le rattraper."""
+    def answer(self, question, history):
+        return AnswerResult(text="Voici la conf : const INT_AUTH_API = 'Zx9KdMq2Lp7Tvb';",
+                            tokens=10)
+
+
+@pytest.mark.asyncio
+async def test_process_output_guardrail_redacts_and_notifies():
+    app = BotApp(agent=_LeakyAgent(), rate_limiter=_RL(), budget=_Budget(),
+                 history=ThreadHistory(2, 1000, clock=lambda: 0.0))
+    reply = await app.process(user_id="u1", thread_id="th1", question="montre la conf")
+    assert "Zx9KdMq2Lp7Tvb" not in reply          # secret masqué en sortie
+    assert "‹secret-rédacté›" in reply
+    assert "pour raisons de sécurité" in reply     # avis utilisateur (anti-confusion)
+    # l'historique mémorise la version caviardée, SANS l'avis (UI only)
+    stored = "".join(m["content"] for m in app.history.get("th1"))
+    assert "Zx9KdMq2Lp7Tvb" not in stored
+    assert "pour raisons de sécurité" not in stored
+
+
+@pytest.mark.asyncio
+async def test_process_clean_reply_has_no_notice():
+    app = BotApp(agent=_Agent(), rate_limiter=_RL(), budget=_Budget(),
+                 history=ThreadHistory(2, 1000, clock=lambda: 0.0))
+    reply = await app.process(user_id="u1", thread_id="th1", question="foudre ?")
+    assert "pour raisons de sécurité" not in reply  # pas d'avis si rien n'est masqué
+
+
 @pytest.mark.asyncio
 async def test_process_rate_limited():
     app = BotApp(agent=_Agent(), rate_limiter=_RL(ok=False), budget=_Budget(),

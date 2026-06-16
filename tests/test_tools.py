@@ -39,6 +39,25 @@ def test_dispatch_unknown_tool_raises(snapshot):
     with pytest.raises(ToolError):
         box.dispatch("delete_all", {})
 
+
+def test_dispatch_read_file_redacts_secrets(snapshot):
+    """read_file ne caviardait RIEN : un user obtenait les secrets bruts d'un fichier de
+    conf. dispatch() les masque désormais (constante AUTH au nom non mot-clé → haute entropie)."""
+    secret = "Zx9KdMq2Lp7Tvb"
+    (snapshot / "conf.php").write_text(f"<?php\nconst INT_AUTH_API = '{secret}';\n")
+    out = ToolBox(snapshot, max_bytes=10000).dispatch("read_file", {"path": "conf.php"})
+    assert secret not in out
+    assert "‹secret-rédacté›" in out
+
+
+def test_dispatch_grep_redacts_secrets(snapshot):
+    """grep ne caviardait rien non plus."""
+    secret = "Mxk3SaltValAaZ9"
+    (snapshot / "conf.php").write_text(f"<?php\nconst USER_SALT1 = '{secret}';\n")
+    out = ToolBox(snapshot, max_bytes=10000).dispatch("grep", {"pattern": "USER_SALT1"})
+    assert secret not in out
+    assert "‹secret-rédacté›" in out
+
 def test_schemas_shape():
     names = {t["name"] for t in SCHEMAS}
     assert names == {"read_file", "grep", "lineage", "kestra_recent", "volumetrie",
