@@ -1,6 +1,8 @@
 import gzip
 
-from ic_data_bot.tools import ToolBox
+import pytest
+
+from ic_data_bot.tools import ToolBox, ToolError
 
 
 def _snap(tmp_path):
@@ -44,3 +46,10 @@ def test_public_mode_still_serves_vol_and_schema(tmp_path):
     tb = ToolBox(_snap(tmp_path), public=True)
     assert "108 190 981" in tb.volumetrie("foudre")
     assert "CREATE TABLE" in tb.schema("foudre")
+
+
+def test_search_code_disabled_by_default(tmp_path, monkeypatch):
+    """Interrupteur maître : sans CODE_INDEX_ENABLED, search_code refuse (pas d'import lancedb)."""
+    monkeypatch.delenv("CODE_INDEX_ENABLED", raising=False)
+    with pytest.raises(ToolError):
+        ToolBox(tmp_path).search_code("n'importe quoi")

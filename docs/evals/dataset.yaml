@@ -294,3 +294,32 @@ questions:
     criteria:
       - "réseau de stations amateurs/communautaires Infoclimat (matériel contributeur ou association)"
       - "n'invente pas une définition hors glossaire"
+
+  # ── M. Recherche de code applicatif (outil search_code) ──
+  - id: M1
+    category: code
+    difficulty: medium
+    mechanism: "search_code (index vectoriel du code des repos)"
+    question: "dans quel script le code récupère et insère les impacts de foudre (Blitzortung) ?"
+    criteria:
+      - "identifie le script via search_code : site-infoclimat/cron/recup_blitzortung.php (ou _ws.php)"
+      - "s'appuie sur la recherche de code, pas seulement sur le contrat/lineage"
+      - "n'invente pas un chemin de fichier non retourné par l'outil"
+
+  - id: M2
+    category: code
+    difficulty: medium
+    mechanism: "search_code"
+    question: "où est calculée la détection des records de température battus dans le code ?"
+    criteria:
+      - "cite le code de détection via search_code (site-infoclimat/cron/records/detection_records.php)"
+      - "n'invente pas un chemin non retourné par search_code"
+
+  - id: M3
+    category: code
+    difficulty: medium
+    mechanism: "search_code (code applicatif, pas le snapshot data-platform)"
+    question: "où est fait le décodage BUFR des observations SYNOP ?"
+    criteria:
+      - "cite un fichier de décodage BUFR synop via search_code (data/traitement/synop/bufr_*.py)"
+      - "s'appuie sur le code applicatif (search_code), pas sur le snapshot/grep"
