@@ -274,3 +274,23 @@ questions:
     criteria:
       - "indique un entier non signé (int ... UNSIGNED ; la largeur (50) est l'affichage MySQL, accessoire)"
       - "s'appuie sur le schéma physique / DDL, pas seulement sur le contrat"
+
+  # ── L. Glossaire (termes métier, catalog/glossary.md) ──
+  - id: L1
+    category: index
+    difficulty: medium
+    mechanism: "glossaire catalog/glossary.md (dans le préfixe / lisible)"
+    question: "c'est quoi geo_id_insee et en quoi diffère-t-il de NUM_POSTE ?"
+    criteria:
+      - "geo_id_insee = identifiant au format ddnnnpp (département/commune Insee/précision), tables temps réel MF"
+      - "NUM_POSTE = numéro Météo-France à 8 chiffres, tables historiques MF"
+      - "les deux désignent le même poste (jointure historique/temps réel)"
+
+  - id: L2
+    category: index
+    difficulty: easy
+    mechanism: "glossaire catalog/glossary.md"
+    question: "c'est quoi le réseau StatIC ?"
+    criteria:
+      - "réseau de stations amateurs/communautaires Infoclimat (matériel contributeur ou association)"
+      - "n'invente pas une définition hors glossaire"
