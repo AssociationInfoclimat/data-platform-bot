@@ -46,25 +46,82 @@ else:
 mcp = FastMCP("data-platform", stateless_http=True, transport_security=_security)
 
 
+# ── Observabilité Langfuse + identité par token ─────────────────────────────
+import contextvars as _cv
+import hashlib as _hashlib
+
+from .telemetry import make_langfuse
+
+_current_user = _cv.ContextVar("mcp_user", default="anonymous")
+
+
+class _LfCfg:
+    langfuse_public_key = os.environ.get("LANGFUSE_PUBLIC_KEY", "")
+    langfuse_secret_key = os.environ.get("LANGFUSE_SECRET_KEY", "")
+    langfuse_host = os.environ.get("LANGFUSE_HOST", "")
+    langfuse_redact = os.environ.get("LANGFUSE_REDACT", "1") not in ("0", "false", "")
+
+
+_lf = make_langfuse(_LfCfg())
+
+
+def _token_labels() -> dict[str, str]:
+    """MCP_TOKEN_LABELS = CSV de paires token:nom (ex. tok1:alice,tok2:bob)."""
+    out: dict[str, str] = {}
+    for pair in os.environ.get("MCP_TOKEN_LABELS", "").split(","):
+        tok, sep, name = pair.partition(":")
+        if sep and tok.strip():
+            out[tok.strip()] = name.strip()
+    return out
+
+
+def _identity(token: str) -> str:
+    """Libellé du porteur : nom mappé sinon id stable anonyme (hash court, jamais le token)."""
+    if not token:
+        return "anonymous"
+    return _token_labels().get(token) or ("user-" + _hashlib.sha256(token.encode()).hexdigest()[:8])
+
+
+def _traced(tool: str, inp: dict, fn):
+    """Exécute fn() et trace l'appel (outil, args, sortie, user) dans Langfuse. Le mask du
+    client rédige à l'ingestion. Ne casse jamais l'outil si Langfuse échoue."""
+    if _lf is None:
+        return fn()
+    try:
+        with _lf.start_as_current_observation(
+            name=f"mcp.{tool}", as_type="span", input=inp,
+            metadata={"transport": "mcp", "user": _current_user.get()},
+        ) as span:
+            out = fn()
+            try:
+                span.update(output=out)
+            except Exception:
+                pass
+            return out
+    except Exception:
+        return fn()
+
+
 # ── Tools ──────────────────────────────────────────────────────────────────
+def _safe(method, *args) -> str:
+    try:
+        return method(*args)
+    except ToolError as exc:
+        return str(exc)
+
+
 @mcp.tool()
 def read_file(path: str) -> str:
     """Lit un fichier du snapshot data-platform (chemin relatif, ex.
     contracts/foudre.odcs.yaml). Tronqué si volumineux. Les chemins _ops/ sont refusés."""
-    try:
-        return _tb.read_file(path)
-    except ToolError as exc:
-        return str(exc)
+    return _traced("read_file", {"path": path}, lambda: _safe(_tb.read_file, path))
 
 
 @mcp.tool()
 def grep(pattern: str, glob: str = "**/*") -> str:
     """Recherche une regex dans le snapshot (filtre glob optionnel, ex. inventory/*.yaml).
     Retourne fichier:ligne: extrait, plafonné. Les fichiers _ops/ sont ignorés."""
-    try:
-        return _tb.grep(pattern, glob)
-    except ToolError as exc:
-        return str(exc)
+    return _traced("grep", {"pattern": pattern, "glob": glob}, lambda: _safe(_tb.grep, pattern, glob))
 
 
 @mcp.tool()
@@ -72,35 +129,31 @@ def lineage(name: str) -> str:
     """Analyse d'impact : entrées complètes des registres (catalog, tables, pipelines,
     sources, stockage, jobs) + contrats mentionnant `name`. Pour « qui lit/écrit X »,
     « qu'est-ce qui dépend de X », statut mort/douteux. L'overlay _ops/ est exclu."""
-    try:
-        return _tb.lineage(name)
-    except ToolError as exc:
-        return str(exc)
+    return _traced("lineage", {"name": name}, lambda: _safe(_tb.lineage, name))
 
 
 @mcp.tool()
 def list_corpus(subdir: str = "") -> str:
     """Liste les fichiers du corpus data-platform (sous subdir optionnel) pour découverte,
     en excluant _ops/. Utiliser ensuite read_file/resource pour lire."""
-    root = Path(SNAPSHOT_DIR).resolve()
-    base = (root / subdir).resolve()
-    if base != root and not str(base).startswith(str(root) + os.sep):
-        return f"Chemin refusé : {subdir}"
-    out = []
-    for fp in sorted(base.rglob("*")):
-        if fp.is_file() and "_ops" not in fp.relative_to(root).parts and ".git" not in fp.parts:
-            out.append(str(fp.relative_to(root)))
-    return "\n".join(out) if out else "Aucun fichier."
+    def _do():
+        root = Path(SNAPSHOT_DIR).resolve()
+        base = (root / subdir).resolve()
+        if base != root and not str(base).startswith(str(root) + os.sep):
+            return f"Chemin refusé : {subdir}"
+        out = []
+        for fp in sorted(base.rglob("*")):
+            if fp.is_file() and "_ops" not in fp.relative_to(root).parts and ".git" not in fp.parts:
+                out.append(str(fp.relative_to(root)))
+        return "\n".join(out) if out else "Aucun fichier."
+    return _traced("list_corpus", {"subdir": subdir}, _do)
 
 
 # ── Resource (lecture par URI) ──────────────────────────────────────────────
 @mcp.resource("dataplatform://{path}")
 def corpus_resource(path: str) -> str:
     """Contenu d'un fichier du corpus data-platform (URI dataplatform://<chemin>)."""
-    try:
-        return _tb.read_file(path)
-    except ToolError as exc:
-        return str(exc)
+    return _traced("resource", {"path": path}, lambda: _safe(_tb.read_file, path))
 
 
 # ── Prompt (persona) ────────────────────────────────────────────────────────
@@ -141,28 +194,41 @@ def _valid_tokens() -> set[str]:
 
 def _build_app():
     import hmac
+    import json
 
-    from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.responses import JSONResponse, PlainTextResponse
+    from starlette.responses import PlainTextResponse
     from starlette.routing import Route
 
-    class BearerAuth(BaseHTTPMiddleware):
-        async def dispatch(self, request, call_next):
-            if request.url.path == "/healthz":
-                return await call_next(request)
+    app = mcp.streamable_http_app()
+    app.router.routes.append(Route("/healthz", lambda r: PlainTextResponse("ok")))
+
+    # Middleware ASGI PURE (pas BaseHTTPMiddleware) : auth bearer + pose l'identité dans
+    # un contextvar AVANT l'app, pour qu'elle propage jusqu'aux outils (tracing Langfuse).
+    class AuthASGI:
+        def __init__(self, inner):
+            self.inner = inner
+
+        async def _deny(self, send, status: int, msg: str):
+            body = json.dumps({"error": msg}).encode()
+            await send({"type": "http.response.start", "status": status,
+                        "headers": [(b"content-type", b"application/json")]})
+            await send({"type": "http.response.body", "body": body})
+
+        async def __call__(self, scope, receive, send):
+            if scope.get("type") != "http" or scope.get("path") == "/healthz":
+                return await self.inner(scope, receive, send)
             tokens = _valid_tokens()
             if not tokens:
-                return JSONResponse({"error": "server misconfigured: no token"}, status_code=503)
-            auth = request.headers.get("authorization", "")
+                return await self._deny(send, 503, "no token configured")
+            headers = dict(scope.get("headers") or [])
+            auth = headers.get(b"authorization", b"").decode()
             presented = auth[7:] if auth.startswith("Bearer ") else ""
             if not any(hmac.compare_digest(presented, t) for t in tokens):
-                return JSONResponse({"error": "unauthorized"}, status_code=401)
-            return await call_next(request)
+                return await self._deny(send, 401, "unauthorized")
+            _current_user.set(_identity(presented))
+            return await self.inner(scope, receive, send)
 
-    app = mcp.streamable_http_app()
-    app.add_middleware(BearerAuth)
-    app.router.routes.append(Route("/healthz", lambda r: PlainTextResponse("ok")))
-    return app
+    return AuthASGI(app)
 
 
 def run() -> None:  # pragma: no cover (point d'entrée I/O)
