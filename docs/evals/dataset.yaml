@@ -272,5 +272,5 @@ questions:
     mechanism: "outil schema (DDL CREATE TABLE depuis schemas/*.sql.gz)"
     question: "quel est le type SQL exact de la colonne dh_usec de la table foudre ?"
     criteria:
-      - "donne le type réel du DDL (int UNSIGNED)"
+      - "indique un entier non signé (int ... UNSIGNED ; la largeur (50) est l'affichage MySQL, accessoire)"
       - "s'appuie sur le schéma physique / DDL, pas seulement sur le contrat"
