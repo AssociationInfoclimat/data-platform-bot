@@ -28,6 +28,13 @@ SECRETS = [
     # - constantes AUTH dont le NOM n'est pas un mot-clé → rattrapées par la haute entropie
     ("const INT_AUTH_API = 'Zx9KdMq2Lp7Tvb';", "Zx9KdMq2Lp7Tvb"),
     ("const EXT_AUTH1 = 'Bc4HmnQ8RsTuWx';", "Bc4HmnQ8RsTuWx"),
+    # VRAIE syntaxe du code legacy : define('NOM', 'valeur') séparé par VIRGULE (pas `=`).
+    # L'entropie/`:=` ne l'atteint pas → bug constaté en prod (secrets sortis en clair).
+    # Nom à mot-clé (salt) :
+    ("define('USER_SALT1', 'Qp7RtsVbnHk2Lm');", "Qp7RtsVbnHk2Lm"),
+    # Nom NON mot-clé → rattrapé par la valeur (haute entropie / symbole) :
+    ("define('INT_AUTH_API', 'Zx9Kd@Mq2LpVb');", "Zx9Kd@Mq2LpVb"),
+    ("define('EXT_AUTH1', 'Wd7HmZ3Btvq9');", "Wd7HmZ3Btvq9"),
 ]
 
 
@@ -39,6 +46,9 @@ def test_no_false_positive_on_non_secret_constants():
         "const ETALAB_LICENSE = 0;",
         "$status = 'actif';",
         "const VERSION = '2024.05.01';",
+        "define('APP_VERSION', '2024.05.01');",
+        "define('DEFAULT_LANG', 'francais');",
+        "define('TIMEZONE', 'Europe/Paris');",
     ]:
         assert redact_secrets(benign) == benign, f"faux positif: {benign!r}"
 

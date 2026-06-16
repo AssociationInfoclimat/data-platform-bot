@@ -35,7 +35,7 @@ _STRONG_KEY = (r"(?:passphrase|passwd|password|pwd|mdp|secret|api[_-]?key|apikey
 # Exclut aussi URLs/chemins/nombres (charset) et le tout-majuscule/tout-minuscule (casse mixte).
 _ENTROPY_RX = re.compile(r"""((?:=>|[:=])\s*)(['"])([^'"\n]{12,})\2""")
 _ENTROPY_CHARSET = re.compile(r"[A-Za-z0-9+/=_@!#$%^&*\-]{12,}\Z")
-_SECRET_SYM = re.compile(r"[+/=@!#$%^&*]")  # symboles « secret » (hors - et _, trop courants en code)
+_SECRET_SYM = re.compile(r"[+=@!#$%^&*]")  # symboles « secret » (hors - _ /, trop courants : chemins, dates, kebab)
 _WORDY_LC_RUN = 5  # un segment minuscule de cette longueur ⇒ mot prononçable, pas un secret
 
 
@@ -61,9 +61,25 @@ def _redact_entropy(m: "re.Match") -> str:
     return m.group(0)
 
 
+# PHP define('NOM', 'valeur') : séparateur VIRGULE (les règles `: = =>` ne l'atteignent pas,
+# et l'entropie non plus). On masque si le NOM contient un mot-clé secret OU si la VALEUR a
+# l'allure d'un secret. C'est la forme réelle des secrets du code legacy (USER_SALT1,
+# INT_AUTH_API, EXT_AUTH*) — la forme `const X = '…'` est, elle, couverte par l'entropie.
+_DEFINE_RX = re.compile(
+    r"""(define\s*\(\s*['"])([^'"\n]+)(['"]\s*,\s*['"])([^'"\n]{2,})(['"])""", re.I)
+_DEFINE_KEY_RX = re.compile(_SECRET_KEY, re.I)
+
+
+def _redact_define(m: "re.Match") -> str:
+    name, val = m.group(2), m.group(4)
+    if _DEFINE_KEY_RX.search(name) or _looks_like_secret(val):
+        return f"{m.group(1)}{name}{m.group(3)}{_S}{m.group(5)}"
+    return m.group(0)
+
+
 _SECRET_RULES = [
-    # define('XXX_PASSWORD', 'valeur') / define("API_KEY", "valeur")  (PHP)
-    (re.compile(r"""(define\s*\(\s*['"][^'"]*(?:pass|secret|key|token|pwd|mdp|cred)[^'"]*['"]\s*,\s*['"])[^'"]{2,}(['"])""", re.I), r"\1" + _S + r"\2"),
+    # define('NOM', 'valeur') (PHP) : nom à mot-clé secret OU valeur à haute entropie
+    (_DEFINE_RX, _redact_define),
     # clé quotée : 'password' => 'valeur'  |  "api_key": "valeur"
     (re.compile(r"""((['"])""" + _SECRET_KEY + r"""\2\s*(?:=>|:)\s*(['"]))[^'"\n]{2,}(['"])""", re.I), r"\1" + _S + r"\4"),
     # clé nue, valeur quotée : password = 'valeur' | USER_SALT1 = '...' (mot-clé en sous-chaîne ; préfixe DB_/MYSQL_ OK)
