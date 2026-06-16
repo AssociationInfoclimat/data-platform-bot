@@ -44,6 +44,47 @@ pousse le dataset + les traces + les **scores du juge** dans Langfuse. Les déta
 internes (IP, domaines homelab) sont **rédactés** avant envoi par défaut
 (`LANGFUSE_REDACT=1`) — important si l'instance est en cloud. Sans clés : désactivé.
 
+## Serveur MCP `data-platform`
+
+En plus du bot Discord, le repo fournit un **serveur MCP autonome** (Model Context
+Protocol) qui réexpose les outils corpus à **tout client MCP** (Claude Code, Claude
+Desktop, IDE…), sans Discord. Code : `src/ic_data_bot/mcp_server.py` (FastMCP,
+transport streamable-HTTP) ; lancement : console script `ic-data-bot-mcp`.
+
+**Ce qu'il fournit** (sur le snapshot `data-platform`) :
+- **Tools** : `read_file`, `grep`, `lineage`, `list_corpus` ;
+- **Resource** : `dataplatform://{chemin}` (lecture d'un fichier du corpus) ;
+- **Prompt** : `data_manager_persona` (le persona du bot, à adopter par le client).
+
+`kestra_recent` n'est PAS exposé (il dépend de l'état live alimenté par Discord).
+
+**Sécurité** :
+- mode **public** de `ToolBox` : l'overlay confidentiel `_ops/` (détails infra) est
+  **refusé** par read_file/grep/lineage ; le serveur clone le repo `data-platform`
+  **public, anonymement**, dans un snapshot dédié (jamais d'overlay) ;
+- **auth bearer** obligatoire — `MCP_BEARER_TOKEN` + `MCP_BEARER_TOKENS` (un token par
+  personne, révocable) → 401 sinon ;
+- derrière un reverse-proxy, autoriser le host public via `MCP_ALLOWED_HOSTS`.
+
+**Observabilité** : si les clés Langfuse sont présentes, chaque appel d'outil est tracé
+(span `mcp.<outil>`, I/O rédactés) avec l'**identité du porteur** du token
+(`MCP_TOKEN_LABELS=token:nom`, sinon `user-<hash>`).
+
+**Lancer** (conteneur dédié, séparé du bot) :
+
+```bash
+docker compose -f docker-compose.mcp.yml up -d --build
+```
+
+**Connecter Claude Code** :
+
+```bash
+claude mcp add --scope user --transport http <nom> \
+  https://<votre-hôte>/mcp --header "Authorization: Bearer <token>"
+```
+
+Variables d'environnement : voir le bloc « Serveur MCP » de `.env.example`.
+
 ## Déploiement
 
 Docker compose sur n'importe quel hôte (prérequis et mise en service :
