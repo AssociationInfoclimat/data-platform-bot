@@ -28,7 +28,7 @@ _STRONG_KEY = (r"(?:passphrase|passwd|password|pwd|mdp|secret|api[_-]?key|apikey
 
 # Valeur quotée « qui ressemble à un secret » indépendamment du nom de la constante : longue
 # chaîne (≥12) sans espace ni séparateur de chemin, casse mixte, et un chiffre OU un symbole
-# « secret ». Couvre les secrets aux noms exotiques (INT_AUTH_API='Fq3@kPx7Rmn',
+# « secret ». Couvre les secrets aux noms exotiques (ex. factices INT_AUTH_API='Fq3@kPx7Rmn',
 # EXT_AUTH1='Wd7HmZ3Btvq9'). GARDE ANTI-FAUX-POSITIF : en l'absence de symbole, on exclut
 # les identifiants « prononçables » (un segment minuscule ≥5 = un mot, ex. MyClassNameV2Handler,
 # UserProfileV2Tpl, sha…) pour ne pas masquer du code légitime que search_code doit montrer.
