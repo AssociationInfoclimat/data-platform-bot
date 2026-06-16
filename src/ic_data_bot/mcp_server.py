@@ -133,6 +133,21 @@ def lineage(name: str) -> str:
 
 
 @mcp.tool()
+def volumetrie(name: str) -> str:
+    """Volumétrie AUDITÉE d'une table (nb lignes + taille) au dernier audit DATÉ, pas le
+    live. Pour « combien de lignes / quelle taille fait X ». Snapshot daté ; l'exact
+    actuel exige une requête SQL en prod."""
+    return _traced("volumetrie", {"name": name}, lambda: _safe(_tb.volumetrie, name))
+
+
+@mcp.tool()
+def schema(name: str) -> str:
+    """DDL réel (CREATE TABLE) d'une table depuis les snapshots de schéma : types de
+    colonnes exacts, clés, index. Complémentaire des contrats ODCS (usage/unités)."""
+    return _traced("schema", {"name": name}, lambda: _safe(_tb.schema, name))
+
+
+@mcp.tool()
 def list_corpus(subdir: str = "") -> str:
     """Liste les fichiers du corpus data-platform (sous subdir optionnel) pour découverte,
     en excluant _ops/. Utiliser ensuite read_file/resource pour lire."""

@@ -41,7 +41,7 @@ def test_dispatch_unknown_tool_raises(snapshot):
 
 def test_schemas_shape():
     names = {t["name"] for t in SCHEMAS}
-    assert names == {"read_file", "grep", "lineage", "kestra_recent"}
+    assert names == {"read_file", "grep", "lineage", "kestra_recent", "volumetrie", "schema"}
 
 
 def _lineage_snapshot(tmp_path):

@@ -254,3 +254,23 @@ questions:
     criteria:
       - "indique que ce flow n'existe PAS / n'est pas dans les registres (inventory/pipelines, lineage/jobs)"
       - "n'invente NI son rôle NI sa source, même si la namespace infoclimat.backups a des flows voisins (forum, gitlab, tiles, site-assets)"
+
+  # ── K. Volumétrie & schéma physique (outils volumetrie / schema) ──
+  - id: K1
+    category: pièges
+    difficulty: medium
+    mechanism: "outil volumetrie (audits/volumetrie/, audit daté)"
+    question: "quel est l'ordre de grandeur du nombre de lignes de la table foudre ?"
+    criteria:
+      - "donne le nombre audité (~108 millions) issu de la volumétrie"
+      - "précise que c'est un snapshot daté (audit), pas le nombre live"
+      - "n'invente pas un chiffre hors de la source"
+
+  - id: K2
+    category: index
+    difficulty: medium
+    mechanism: "outil schema (DDL CREATE TABLE depuis schemas/*.sql.gz)"
+    question: "quel est le type SQL exact de la colonne dh_usec de la table foudre ?"
+    criteria:
+      - "donne le type réel du DDL (int UNSIGNED)"
+      - "s'appuie sur le schéma physique / DDL, pas seulement sur le contrat"

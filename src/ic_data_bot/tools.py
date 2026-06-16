@@ -21,6 +21,11 @@ MAX_LINEAGE_ENTRIES_PER_FILE = 6
 MAX_LINEAGE_ENTRY_CHARS = 1200
 MAX_LINEAGE_TOTAL_CHARS = 12_000
 
+# Volumétrie auditée (CSV datés) et snapshots DDL (gzip).
+VOLUMETRIE_DIR = "audits/volumetrie"
+SCHEMA_FILES = ["schemas/mariadb/schema.sql.gz", "schemas/timescaledb/schema.sql.gz"]
+MAX_SCHEMA_CHARS = 6_000
+
 
 class ToolError(Exception):
     """Erreur d'outil renvoyée à Claude (is_error=True)."""
@@ -104,6 +109,40 @@ SCHEMAS = [
                 }
             },
             "required": [],
+        },
+    },
+    {
+        "name": "volumetrie",
+        "description": (
+            "Volumétrie AUDITÉE d'une table : nombre de lignes et taille au dernier audit "
+            "DATÉ (audits/volumetrie/), pas le live. Appelle-le pour « combien de lignes / "
+            "quelle taille fait la table X », un ordre de grandeur. Précise toujours que "
+            "c'est un snapshot daté ; le compte exact actuel exige une requête SQL en prod. "
+            "N'invente jamais un volume — utilise CET outil ou dis que tu ne sais pas."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Nom (ou fragment) de table — ex. 'foudre', 'Infrahoraire'"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "schema",
+        "description": (
+            "DDL RÉEL d'une table (CREATE TABLE) depuis les snapshots de schéma "
+            "(schemas/{mariadb,timescaledb}/schema.sql.gz) : types de colonnes exacts, clés, "
+            "index. Appelle-le pour « quel type a la colonne X », « le schéma physique de la "
+            "table Y » — vérité physique, complémentaire des contrats ODCS (qui, eux, donnent "
+            "l'usage et les unités). Donne le nom EXACT de la table."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Nom exact de la table — ex. 'foudre', 'Infrahoraire'"},
+            },
+            "required": ["name"],
         },
     },
 ]
@@ -273,6 +312,71 @@ class ToolBox:
             )
         return "\n\n".join(sections)
 
+    def volumetrie(self, name: str) -> str:
+        """Volumétrie auditée (nb lignes + taille) d'une table, par audit daté. Snapshot,
+        pas le live : le décompte exact actuel exige une requête SQL en prod."""
+        import csv
+        import re
+
+        needle = name.strip().lower().replace("-", "_")
+        if not needle:
+            raise ToolError("Nom vide.")
+        vdir = self.root / VOLUMETRIE_DIR
+        rows = []  # (date, system, db, table, row_estimate, total_bytes)
+        for fp in sorted(vdir.glob("*.csv")) if vdir.is_dir() else []:
+            m = re.search(r"(\d{8})", fp.name)
+            date = f"{m.group(1)[:4]}-{m.group(1)[4:6]}-{m.group(1)[6:]}" if m else "?"
+            try:
+                reader = csv.DictReader(fp.read_text(encoding="utf-8", errors="replace").splitlines())
+            except OSError:
+                continue
+            for r in reader:
+                tbl = r.get("table") or ""
+                if needle in tbl.lower().replace("-", "_"):
+                    rows.append((date, r.get("system", ""), r.get("database", ""), tbl,
+                                 r.get("row_estimate", ""), r.get("total_bytes", "")))
+        if not rows:
+            return (f"Aucune volumétrie auditée pour « {name} » dans {VOLUMETRIE_DIR}/. "
+                    "Le snapshot ne donne pas de décompte ; requête SQL en prod pour l'exact.")
+        rows.sort(key=lambda x: x[0], reverse=True)
+        out = ["Volumétrie AUDITÉE (snapshot DATÉ, pas le live ; exact actuel = requête SQL prod) :"]
+        for date, sysn, db, tbl, rowest, totb in rows[:20]:
+            try:
+                gib = f"{int(totb) / 1024 ** 3:.1f} GiB"
+            except (ValueError, TypeError):
+                gib = "?"
+            try:
+                n = f"{int(rowest):,}".replace(",", " ")
+            except (ValueError, TypeError):
+                n = rowest or "?"
+            out.append(f"- {sysn}://{db}/{tbl} : {n} lignes (~{gib}) — audit {date}")
+        return "\n".join(out)
+
+    def schema(self, name: str) -> str:
+        """DDL CREATE TABLE de `name` depuis les snapshots schemas/*/schema.sql.gz."""
+        import gzip
+        import re
+
+        tbl = name.strip()
+        if not tbl:
+            raise ToolError("Nom vide.")
+        pat = re.compile(r'CREATE TABLE[^;]*?[`"]' + re.escape(tbl) + r'[`"][^;]*?;',
+                         re.IGNORECASE | re.DOTALL)
+        blocks = []
+        for rel in SCHEMA_FILES:
+            fp = self.root / rel
+            if not fp.is_file():
+                continue
+            try:
+                ddl = gzip.decompress(fp.read_bytes()).decode("utf-8", errors="replace")
+            except (OSError, gzip.BadGzipFile):
+                continue
+            for m in pat.finditer(ddl):
+                blocks.append(f"### {rel}\n{m.group(0).strip()[:MAX_SCHEMA_CHARS]}")
+        if not blocks:
+            return f"Aucun DDL pour « {name} » dans {', '.join(SCHEMA_FILES)} (vérifie le nom exact)."
+        return "\n\n".join(blocks)[: MAX_SCHEMA_CHARS * 2]
+
     def dispatch(self, name: str, tool_input: dict) -> str:
         if name == "read_file":
             return self.read_file(tool_input["path"])
@@ -280,6 +384,10 @@ class ToolBox:
             return self.grep(tool_input["pattern"], tool_input.get("glob") or "**/*")
         if name == "lineage":
             return self.lineage(tool_input["name"])
+        if name == "volumetrie":
+            return self.volumetrie(tool_input["name"])
+        if name == "schema":
+            return self.schema(tool_input["name"])
         if name == "kestra_recent":
             if self.kestra_log is None:
                 raise ToolError("Événements Kestra non configurés sur ce déploiement.")
