@@ -43,6 +43,19 @@ def test_no_false_positive_on_non_secret_constants():
         assert redact_secrets(benign) == benign, f"faux positif: {benign!r}"
 
 
+def test_no_false_positive_on_camelcase_identifiers():
+    """Garde anti-mot : un identifiant « prononçable » (long segment minuscule), même en
+    casse mixte avec un chiffre, n'est PAS un secret — la règle d'entropie ne doit pas le
+    masquer, sinon search_code rend du code légitime illisible."""
+    for benign in [
+        "$handler = 'MyClassNameV2Handler';",
+        "$tpl = 'UserProfileV2Tpl';",
+        "$cls => 'AbstractServiceFactory';",
+        "$css = 'btnPrimary2Block';",
+    ]:
+        assert redact_secrets(benign) == benign, f"faux positif: {benign!r}"
+
+
 def test_secrets_are_masked():
     for line, secret in SECRETS:
         out = redact_secrets(line)

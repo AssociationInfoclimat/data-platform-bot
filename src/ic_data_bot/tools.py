@@ -27,18 +27,36 @@ _STRONG_KEY = (r"(?:passphrase|passwd|password|pwd|mdp|secret|api[_-]?key|apikey
                r"app[_-]?id|client[_-]?secret|consumer[_-]?secret|encryption[_-]?key|crypt[_-]?key)")
 
 # Valeur quotée « qui ressemble à un secret » indépendamment du nom de la constante : longue
-# chaîne sans espace/séparateur de chemin, casse mixte ET un chiffre/symbole. Couvre les
-# secrets aux noms exotiques (INT_AUTH_API='Fq3@kPx7Rmn'). Exclut URLs, chemins, nombres,
-# mots tout-en-majuscules (enum), identifiants CamelCase sans chiffre.
+# chaîne (≥12) sans espace ni séparateur de chemin, casse mixte, et un chiffre OU un symbole
+# « secret ». Couvre les secrets aux noms exotiques (INT_AUTH_API='Fq3@kPx7Rmn',
+# EXT_AUTH1='Wd7HmZ3Btvq9'). GARDE ANTI-FAUX-POSITIF : en l'absence de symbole, on exclut
+# les identifiants « prononçables » (un segment minuscule ≥5 = un mot, ex. MyClassNameV2Handler,
+# UserProfileV2Tpl, sha…) pour ne pas masquer du code légitime que search_code doit montrer.
+# Exclut aussi URLs/chemins/nombres (charset) et le tout-majuscule/tout-minuscule (casse mixte).
 _ENTROPY_RX = re.compile(r"""((?:=>|[:=])\s*)(['"])([^'"\n]{12,})\2""")
 _ENTROPY_CHARSET = re.compile(r"[A-Za-z0-9+/=_@!#$%^&*\-]{12,}\Z")
+_SECRET_SYM = re.compile(r"[+/=@!#$%^&*]")  # symboles « secret » (hors - et _, trop courants en code)
+_WORDY_LC_RUN = 5  # un segment minuscule de cette longueur ⇒ mot prononçable, pas un secret
+
+
+def _looks_like_secret(val: str) -> bool:
+    """Heuristique de VALEUR (nom de constante ignoré) : longue, casse mixte, entropie élevée,
+    sans ressembler à un identifiant prononçable. Sens d'échec choisi = sur-masquer (sûr)."""
+    if not (_ENTROPY_CHARSET.match(val)
+            and re.search(r"[a-z]", val) and re.search(r"[A-Z]", val)):
+        return False
+    has_sym = bool(_SECRET_SYM.search(val))
+    if not (has_sym or re.search(r"[0-9]", val)):
+        return False
+    if not has_sym:
+        longest_lc = max((len(r) for r in re.findall(r"[a-z]+", val)), default=0)
+        if longest_lc >= _WORDY_LC_RUN:
+            return False
+    return True
 
 
 def _redact_entropy(m: "re.Match") -> str:
-    val = m.group(3)
-    if (_ENTROPY_CHARSET.match(val)
-            and re.search(r"[a-z]", val) and re.search(r"[A-Z]", val)
-            and re.search(r"[0-9+/=_@!#$%^&*\-]", val)):
+    if _looks_like_secret(m.group(3)):
         return f"{m.group(1)}{m.group(2)}{_S}{m.group(2)}"
     return m.group(0)
 
