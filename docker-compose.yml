@@ -9,9 +9,12 @@ services:
     # Port santé NON publié : le bot est sortant (Gateway Discord) et le
     # healthcheck Docker interroge localhost:8080 à l'intérieur du conteneur.
     # Aucune exposition réseau nécessaire (pas de route Traefik).
+    # Index code vectoriel (lecture seule) pour search_code côté bot interne aussi
+    # (CODE_INDEX_HOST_DIR sur l'hôte → /opt/ci ; cf. .env).
     volumes:
       - clone:/data/data-platform
       - state:/var/lib/ic-data-bot
+      - ${CODE_INDEX_HOST_DIR:-./code-index}:/opt/ci:ro
     restart: unless-stopped
     mem_limit: 512m
     healthcheck:

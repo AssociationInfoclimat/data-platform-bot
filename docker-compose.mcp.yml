@@ -15,10 +15,14 @@ services:
     ports:
       - "${MCP_PORT:-8765}:8765"
     # Volume DÉDIÉ, distinct du `clone` du bot (qui contient _ops/) → snapshot public propre.
+    # + index code vectoriel (lecture seule) pour l'outil search_code (CODE_INDEX_HOST_DIR
+    #   sur l'hôte → /opt/ci ; cf. CODE_INDEX_DIR/CODE_INDEX_TOOLS_DIR dans .env).
     volumes:
       - clone-mcp:/data/data-platform
+      - ${CODE_INDEX_HOST_DIR:-./code-index}:/opt/ci:ro
     restart: unless-stopped
-    mem_limit: 256m
+    # 512 Mo : marge pour le back-end vectoriel lancedb (import + recherche) de search_code.
+    mem_limit: 512m
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8765/healthz"]
       interval: 30s
