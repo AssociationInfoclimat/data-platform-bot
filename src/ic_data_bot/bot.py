@@ -19,6 +19,7 @@ from .context import (
     set_persona_source,
 )
 from .corrections import CorrectionsStore
+from .discord_format import format_for_discord
 from .github_issues import close_issue, contains_internal_details, create_issue, issue_body
 from .guardrails import DailyBudget, RateLimiter, is_allowed_channel
 from .kestra_events import KestraEventLog
@@ -65,8 +66,12 @@ def should_respond(*, author_is_bot: bool, channel_id: int, allowed_channel_id: 
 def split_for_discord(text: str, limit: int = 1900, max_messages: int = 3) -> list[str]:
     """Découpe une réponse en messages Discord (<= limit chacun), sur des
     frontières propres (paragraphe > ligne > espace), en refermant/rouvrant
-    les blocs ``` à cheval sur deux messages. Remplace la troncature brute."""
-    text = text.strip()
+    les blocs ``` à cheval sur deux messages. Remplace la troncature brute.
+
+    Applique d'abord `format_for_discord` (tableaux Markdown → bloc ```, suppression des
+    `---`) : fix DÉTERMINISTE du format, car les modèles (surtout Magistral en `!deep`)
+    ignorent les consignes de la persona. Couvre tous les chemins (rapide, deep, incident)."""
+    text = format_for_discord(text).strip()
     if not text:
         return [text]
     # Marge pour les fences ``` ajoutées en fermeture/réouverture.
