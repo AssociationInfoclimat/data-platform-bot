@@ -311,7 +311,10 @@ SCHEMAS = [
             "« quels champs/paramètres renvoie l'API X, dans quelles unités », « est-ce servi / "
             "suis-je abonné ». ATTENTION : les réponses DPObs/DPPaquetObs sont en UNITÉS SI BRUTES "
             "(Kelvin, Pascal). Complémentaire du tool `schema` (DDL des tables PERSISTÉES, unités "
-            "converties) : pour une API MF utilise CET outil, pour une table de la base utilise `schema`."
+            "converties) : pour une API MF utilise CET outil, pour une table de la base utilise `schema`. "
+            "topic='changes' renvoie l'HISTORIQUE versionné des changements de schéma de l'API "
+            "(champs renommés/supprimés, changements d'unité), avec sévérité breaking/non-breaking/"
+            "deprecated — répond à « qu'est-ce qui a changé sur cette API et quand »."
         ),
         "input_schema": {
             "type": "object",
@@ -322,12 +325,18 @@ SCHEMAS = [
                 },
                 "topic": {
                     "type": "string",
-                    "enum": ["contract", "schema", "all"],
-                    "description": "contract = URL/quirks (défaut) ; schema = champs/unités ; all = les deux.",
+                    "enum": ["contract", "schema", "changes", "all"],
+                    "description": "contract = URL/quirks (défaut) ; schema = champs/unités ; "
+                                   "changes = historique versionné ; all = contrat + schéma.",
                 },
                 "probe": {
                     "type": "boolean",
                     "description": "Si vrai, teste la disponibilité live de l'endpoint (nécessite les credentials MF).",
+                },
+                "since": {
+                    "type": "string",
+                    "description": "Avec topic='changes' : ne renvoyer que les changements à partir "
+                                   "de cette date ISO (ex. '2026-01-01'). Optionnel.",
                 },
             },
             "required": [],
@@ -680,5 +689,6 @@ class ToolBox:
                 tool_input.get("api") or "",
                 tool_input.get("topic") or "contract",
                 bool(tool_input.get("probe")),
+                tool_input.get("since") or "",
             )
         raise ToolError(f"Outil inconnu : {name}")

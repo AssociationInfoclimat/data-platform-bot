@@ -164,13 +164,14 @@ def schema(name: str) -> str:
 
 
 @mcp.tool()
-def meteofrance_catalog(api: str = "", topic: str = "contract", probe: bool = False) -> str:
-    """Catalogue de référence des APIs Météo-France : contrat d'URL (host/context/auth/quirks),
-    SCHÉMA de données (champs/paramètres + unités — DPObs en SI brut : Kelvin/Pascal), et probe
-    de disponibilité. `api` vide = vue d'ensemble ; topic=contract|schema|all ; probe nécessite
-    MF_PROBE_ENABLED + credentials. Complémentaire de `schema` (DDL des tables persistées)."""
-    return _traced("meteofrance_catalog", {"api": api, "topic": topic, "probe": probe},
-                   lambda: _safe(_tb.meteofrance_catalog, api, topic, probe))
+def meteofrance_catalog(api: str = "", topic: str = "contract", probe: bool = False,
+                        since: str = "") -> str:
+    """Catalogue de référence des APIs Météo-France (contrats ODCS versionnés) : contrat d'URL
+    (host/context/auth/quirks), SCHÉMA (champs + unités — DPObs en SI brut : Kelvin/Pascal), et
+    HISTORIQUE des changements (topic='changes', sévérité breaking/non-breaking/deprecated ;
+    `since`=date ISO pour filtrer). `api` vide = vue d'ensemble ; probe nécessite MF_PROBE_ENABLED."""
+    return _traced("meteofrance_catalog", {"api": api, "topic": topic, "probe": probe, "since": since},
+                   lambda: _safe(_tb.meteofrance_catalog, api, topic, probe, since))
 
 
 @mcp.tool()

@@ -259,3 +259,14 @@ def test_dispatch_meteofrance_catalog(tmp_path):
     _seed(tmp_path)
     out = ToolBox(tmp_path).dispatch("meteofrance_catalog", {"api": "DPObs", "topic": "schema"})
     assert "geo_id_insee" in out
+
+
+def test_dispatch_changes_with_since(tmp_path):
+    _seed(tmp_path)
+    box = ToolBox(tmp_path)
+    out = box.dispatch("meteofrance_catalog",
+                       {"api": "DPObs", "topic": "changes", "since": "2026-06-01"})
+    # le changement breaking du 2026-05-12 doit être filtré par since=2026-06-01
+    assert "2.0.0" not in out
+    out_all = box.dispatch("meteofrance_catalog", {"api": "DPObs", "topic": "changes"})
+    assert "2.0.0" in out_all
