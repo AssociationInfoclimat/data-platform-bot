@@ -271,7 +271,10 @@ SCHEMAS = [
             "Recherche HYBRIDE (sémantique + lexicale BM25, fusionnées) sur des chunks "
             "contextualisés, avec réécriture automatique de la requête : poser la question "
             "telle quelle, sans la transformer en mots-clés. Renvoie les extraits les plus "
-            "pertinents avec repo/chemin:lignes."
+            "pertinents avec repo/chemin:lignes. Chaque extrait est annoté de sa source "
+            "(github=moderne, gitlab=souvent legacy), de son âge et de son statut gouvernance "
+            "(actif/douteux/mort) : PRIVILÉGIER le code actif/récent et SIGNALER explicitement "
+            "si la réponse repose sur du code legacy/mort."
         ),
         "input_schema": {
             "type": "object",
@@ -616,7 +619,12 @@ class ToolBox:
         blocks = []
         for r in results:
             snippet = redact_secrets("\n".join(r.text.splitlines()[:18]))
-            blocks.append(f"### {r.location} ({r.lang}, distance {r.score:.3f})\n{snippet}")
+            # Autorité/récence (statut gouvernance + âge) : getattr → compat ancien code_index.
+            flag = getattr(r, "flag", "") or ""
+            src = getattr(r, "source", "") or ""
+            tags = " ".join(t for t in (src, flag) if t)
+            head = f"### {r.location} ({r.lang}{(', ' + tags) if tags else ''})"
+            blocks.append(f"{head}\n{snippet}")
         out = "\n\n".join(blocks)
         # Filet sémantique : un petit LLM repère les secrets que le regex ignore (noms
         # exotiques). Si indispo/erreur, on garde la sortie regex (jamais de fuite au-delà).
