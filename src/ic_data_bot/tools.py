@@ -624,15 +624,16 @@ class ToolBox:
             out = self.secret_scrub(out)
         return out
 
-    def meteofrance_catalog(self, api: str = "", topic: str = "contract", probe: bool = False) -> str:
+    def meteofrance_catalog(self, api: str = "", topic: str = "contract", probe: bool = False,
+                            since: str = "") -> str:
         from . import meteofrance_catalog as cat
 
         api = (api or "").strip()
         if not api:
-            return cat.overview()
-        entry = cat.find(api)
+            return cat.overview(self.root)
+        entry = cat.find(self.root, api)
         if entry is None:
-            return cat.not_found(api)
+            return cat.not_found(self.root, api)
         if probe:
             if self.meteofrance is None:
                 raise ToolError(
@@ -641,6 +642,8 @@ class ToolBox:
                 )
             return cat.render_probe(entry, self.meteofrance)
         topic = (topic or "contract").lower()
+        if topic == "changes":
+            return cat.render_changes(entry, since or None)
         if topic == "schema":
             return cat.render_schema(entry)
         if topic == "all":
