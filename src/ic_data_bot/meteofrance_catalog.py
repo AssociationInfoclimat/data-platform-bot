@@ -41,7 +41,7 @@ def _custom(doc: dict, key: str):
 
 def _is_source(doc: dict) -> bool:
     tags = doc.get("tags") or []
-    return "source" in tags and "meteofrance" in tags
+    return isinstance(tags, list) and "source" in tags and "meteofrance" in tags
 
 
 def _to_entry(doc: dict) -> dict:
@@ -87,10 +87,10 @@ def load_sources(root) -> list[dict]:
     for fp in sorted(d.glob("*.odcs.yaml")):
         try:
             doc = yaml.safe_load(fp.read_text(encoding="utf-8", errors="replace"))
-        except yaml.YAMLError:
+            if isinstance(doc, dict) and _is_source(doc):
+                entries.append(_to_entry(doc))
+        except (yaml.YAMLError, AttributeError, TypeError):
             continue
-        if isinstance(doc, dict) and _is_source(doc):
-            entries.append(_to_entry(doc))
     return entries
 
 

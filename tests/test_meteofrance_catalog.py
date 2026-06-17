@@ -233,6 +233,14 @@ def test_probe_served(tmp_path):
     assert stub.calls and stub.calls[0][1] is True
 
 
+def test_probe_not_subscribed(tmp_path):
+    stub = _StubMF({"status": 403, "content_type": "application/json",
+                    "snippet": '{"code":"900908","message":"API Subscription validation failed"}'})
+    out = _box(tmp_path, meteofrance=stub).meteofrance_catalog(api="DPObs", probe=True)
+    assert "900908" in out
+    assert "abonn" in out.lower()
+
+
 def test_probe_open_data_no_auth(tmp_path):
     stub = _StubMF({"status": 200, "content_type": "text/csv", "snippet": "x"})
     _box(tmp_path, meteofrance=stub).meteofrance_catalog(api="climato-data-gouv", probe=True)
