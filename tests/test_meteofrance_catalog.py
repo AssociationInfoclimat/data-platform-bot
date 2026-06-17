@@ -270,3 +270,13 @@ def test_dispatch_changes_with_since(tmp_path):
     assert "2.0.0" not in out
     out_all = box.dispatch("meteofrance_catalog", {"api": "DPObs", "topic": "changes"})
     assert "2.0.0" in out_all
+
+
+def test_changes_sorted_by_version_not_date(tmp_path):
+    # Dans le fixture, DPObs 2.0.0 est daté 2026-05-12 (AVANT la 1.0.0 datée 2026-06-17).
+    # Un tri par date placerait 1.0.0 en tête ; le tri par VERSION doit donner 2.0.0 d'abord.
+    out = _box(tmp_path).meteofrance_catalog(api="DPObs", topic="changes")
+    rows = [l for l in out.splitlines()
+            if l.startswith("| ") and "Version" not in l and "---" not in l]
+    assert rows[0].split("|")[1].strip() == "2.0.0", rows[0]
+    assert rows[1].split("|")[1].strip() == "1.0.0", rows[1]

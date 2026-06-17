@@ -166,9 +166,19 @@ def render_schema(e: dict) -> str:
     return "\n".join(lines)
 
 
+def _version_key(c: dict) -> tuple:
+    """Clé de tri semver (tuple d'entiers), fallback (0,) si non parsable. On trie par
+    VERSION décroissante (puis date) et non par date seule : le baseline initial est parfois
+    rétro-daté avant un changement réel, donc la date ne reflète pas l'ordre des versions."""
+    try:
+        return tuple(int(p) for p in str(c.get("version", "0")).split("."))
+    except ValueError:
+        return (0,)
+
+
 def render_changes(e: dict, since: str | None = None) -> str:
     """Historique versionné depuis customProperties.changelog. `since` = date ISO (incluse).
-    Filtre par date (les dates ISO se trient comme des chaînes ; pas de comparaison semver)."""
+    Filtre par date ; tri par VERSION semver décroissante puis date (cf. _version_key)."""
     cl = list(e.get("changelog") or [])
     if since:
         cl = [c for c in cl if str(c.get("date", "")) >= since]
@@ -177,7 +187,7 @@ def render_changes(e: dict, since: str | None = None) -> str:
         if since:
             return base + f"\n\n(Aucun changement enregistré depuis {since}.)"
         return base + "\n\n(Aucun changement enregistré : version courante du contrat.)"
-    cl.sort(key=lambda c: str(c.get("date", "")), reverse=True)
+    cl.sort(key=lambda c: (_version_key(c), str(c.get("date", ""))), reverse=True)
     lines = [
         f"# Historique des changements — {e['label']}  (`{e['id']}`)",
         "",
