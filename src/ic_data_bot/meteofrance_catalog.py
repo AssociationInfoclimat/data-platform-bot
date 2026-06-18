@@ -89,7 +89,9 @@ def load_sources(root) -> list[dict]:
         try:
             doc = yaml.safe_load(fp.read_text(encoding="utf-8", errors="replace"))
             if isinstance(doc, dict) and _is_source(doc):
-                entries.append(_to_entry(doc))
+                e = _to_entry(doc)
+                e["rel"] = fp.relative_to(Path(root)).as_posix()  # chemin contrat → URL source (par l'appelant)
+                entries.append(e)
         except (yaml.YAMLError, AttributeError, TypeError):
             continue
     return entries

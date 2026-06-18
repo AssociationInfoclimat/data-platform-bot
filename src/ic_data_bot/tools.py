@@ -741,12 +741,18 @@ class ToolBox:
             return cat.render_probe(entry, self.meteofrance)
         topic = (topic or "contract").lower()
         if topic == "changes":
-            return cat.render_changes(entry, since or None)
-        if topic == "schema":
-            return cat.render_schema(entry)
-        if topic == "all":
-            return cat.render_contract(entry) + "\n\n" + cat.render_schema(entry)
-        return cat.render_contract(entry)
+            out = cat.render_changes(entry, since or None)
+        elif topic == "schema":
+            out = cat.render_schema(entry)
+        elif topic == "all":
+            out = cat.render_contract(entry) + "\n\n" + cat.render_schema(entry)
+        else:
+            out = cat.render_contract(entry)
+        # URL source INTERNE (contrat sur GitHub) à citer — le modèle ne doit pas l'inventer.
+        url = self._dp_url(entry["rel"]) if entry.get("rel") else ""
+        if url:
+            out += f"\n\nsource interne : {url}"
+        return out
 
     def dispatch(self, name: str, tool_input: dict) -> str:
         # Point d'étranglement UNIQUE : toute sortie d'outil passe par redact_secrets avant
