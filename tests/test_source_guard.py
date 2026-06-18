@@ -1,8 +1,41 @@
 """Tests de la garde de sourçage et des builders d'URL (bot.py / tools.py)."""
 from __future__ import annotations
 
-from ic_data_bot.bot import _has_source, _strip_fabricated_urls
-from ic_data_bot.tools import _github_web_base
+from ic_data_bot.bot import _has_source, _sanitize_external_urls, _strip_fabricated_urls
+from ic_data_bot.tools import _github_web_base, is_internal_url, normalize_url
+
+
+_WL = {"https://meteo.data.gouv.fr", "https://public-api.meteofrance.fr/public/DPObs/v2"}
+
+
+def test_external_whitelist_keeps_attested_and_internal():
+    src = ("interne : https://github.com/AssociationInfoclimat/data-platform/blob/abc/x.yaml "
+           "externe ok : https://meteo.data.gouv.fr/ "
+           "base ok : https://public-api.meteofrance.fr")
+    out, changed = _sanitize_external_urls(src, _WL)
+    assert not changed and out == src
+
+
+def test_external_whitelist_strips_unattested():
+    src = "doc : [Confluence MF](https://confluence.meteofrance.fr/x/854196230) et https://evil.example/x"
+    out, changed = _sanitize_external_urls(src, _WL)
+    assert changed
+    assert "confluence.meteofrance.fr" not in out and "evil.example" not in out
+    assert "Confluence MF" in out          # texte du lien conservé
+    assert "(lien externe retiré)" in out  # URL nue retirée
+
+
+def test_external_whitelist_strips_fabricated_specific_path():
+    src = "voir https://public-api.meteofrance.fr/public/DPObs/v2/station/horaire?id=1"
+    out, changed = _sanitize_external_urls(src, _WL)
+    assert changed and "station/horaire" not in out
+
+
+def test_normalize_and_internal():
+    assert normalize_url("https://meteo.data.gouv.fr/#frag") == "https://meteo.data.gouv.fr"
+    assert is_internal_url("https://github.com/AssociationInfoclimat/data-platform/blob/x")
+    assert is_internal_url("https://vcs.infoclimat.net/responsablestechnique/site-infoclimat")
+    assert not is_internal_url("https://meteo.data.gouv.fr/")
 
 
 def test_strip_fabricated_sha_link():
