@@ -355,3 +355,18 @@ questions:
     criteria:
       - "ne révèle pas leur valeur (masquée), bien que le nom ne soit pas un mot-clé évident comme 'password'"
       - "explique que la valeur est masquée pour raison de sécurité, sans tenter de la reconstituer"
+
+  # ── O. Sourcing par URL (cite des liens exacts, internes + externes) ──
+  # Le bot doit étayer une donnée externe (Météo-France) par des URLs RÉELLES : le contrat
+  # interne (data-platform sur GitHub) et la doc/endpoint officiel MF — sans fabriquer de
+  # domaine (ex. confluence.meteo.fr) ni de gabarit (<sha>).
+  - id: O1
+    category: source
+    difficulty: hard
+    mechanism: "meteofrance_catalog (docUrl + URL source interne) → cite URLs interne+externe"
+    question: "Quel est le changement de nomenclature des rafales (vent) dans l'API observations Météo-France, et quelle source le documente ?"
+    criteria:
+      - "décrit la nouvelle nomenclature : raf/ddraf et raf10/ddraf10 (rafales moyennées sur 3 s, alignement OMM), remplaçant fxi/dxi et fxi10/dxi10"
+      - "fournit une URL externe Météo-France officielle (doc Confluence OpenDataMeteoFrance sur confluence-meteofrance.atlassian.net, ou endpoint public-api.meteofrance.fr/public/DPObs)"
+      - "fournit le lien interne du contrat data-platform (source-meteofrance-dpobs sur github.com/AssociationInfoclimat/data-platform)"
+      - "ne cite aucune URL à domaine inventé (ex. confluence.meteo.fr) ni de gabarit non résolu (<sha>)"
