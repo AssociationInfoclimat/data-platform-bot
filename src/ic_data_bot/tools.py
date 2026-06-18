@@ -609,6 +609,7 @@ class ToolBox:
             raise ToolError("Nom vide.")
         vdir = self.root / VOLUMETRIE_DIR
         rows = []  # (date, system, db, table, row_estimate, total_bytes)
+        srcs: set[str] = set()  # fichiers d'audit ayant contribué → URL source
         for fp in sorted(vdir.glob("*.csv")) if vdir.is_dir() else []:
             m = re.search(r"(\d{8})", fp.name)
             date = f"{m.group(1)[:4]}-{m.group(1)[4:6]}-{m.group(1)[6:]}" if m else "?"
@@ -621,6 +622,7 @@ class ToolBox:
                 if needle in tbl.lower().replace("-", "_"):
                     rows.append((date, r.get("system", ""), r.get("database", ""), tbl,
                                  r.get("row_estimate", ""), r.get("total_bytes", "")))
+                    srcs.add(fp.relative_to(self.root).as_posix())
         if not rows:
             return (f"Aucune volumétrie auditée pour « {name} » dans {VOLUMETRIE_DIR}/. "
                     "Le snapshot ne donne pas de décompte ; requête SQL en prod pour l'exact.")
@@ -636,6 +638,9 @@ class ToolBox:
             except (ValueError, TypeError):
                 n = rowest or "?"
             out.append(f"- {sysn}://{db}/{tbl} : {n} lignes (~{gib}) — audit {date}")
+        urls = [u for u in (self._dp_url(s) for s in sorted(srcs)) if u]
+        if urls:
+            out.append("source : " + " ; ".join(urls))
         return "\n".join(out)
 
     def schema(self, name: str) -> str:
@@ -657,8 +662,10 @@ class ToolBox:
                 ddl = gzip.decompress(fp.read_bytes()).decode("utf-8", errors="replace")
             except (OSError, gzip.BadGzipFile):
                 continue
+            _u = self._dp_url(rel)
+            _src = f"\nsource : {_u}" if _u else ""
             for m in pat.finditer(ddl):
-                blocks.append(f"### {rel}\n{m.group(0).strip()[:MAX_SCHEMA_CHARS]}")
+                blocks.append(f"### {rel}{_src}\n{m.group(0).strip()[:MAX_SCHEMA_CHARS]}")
         if not blocks:
             return f"Aucun DDL pour « {name} » dans {', '.join(SCHEMA_FILES)} (vérifie le nom exact)."
         return "\n\n".join(blocks)[: MAX_SCHEMA_CHARS * 2]
