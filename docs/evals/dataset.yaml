@@ -41,7 +41,7 @@ questions:
     mechanism: "préfixe (index contrats), 0 outil"
     question: "combien de contrats ODCS existent et lesquels sont en draft ?"
     criteria:
-      - "indique 21 contrats (tolérance ±1)"
+      - "indique ~42 contrats (tolérance ±2 ; contracts/ a grossi avec les contrats Météo-France)"
       - "liste les 4 contrats draft : forums2-ipboard, modeles-nwp-fichiers, previsions-api-opendata, satellite-tuiles-fichiers"
       - "n'utilise pas de tableau Markdown à pipes (lignes « | … | ») — les en-têtes, listes à puces ou numérotées sont OK"
 
