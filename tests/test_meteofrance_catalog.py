@@ -280,3 +280,27 @@ def test_changes_sorted_by_version_not_date(tmp_path):
             if l.startswith("| ") and "Version" not in l and "---" not in l]
     assert rows[0].split("|")[1].strip() == "2.0.0", rows[0]
     assert rows[1].split("|")[1].strip() == "1.0.0", rows[1]
+
+
+def test_contract_shows_doc_source(tmp_path):
+    _write(tmp_path, "source-meteofrance-x.odcs.yaml", """
+        apiVersion: v3.0.2
+        kind: DataContract
+        id: urn:infoclimat:contract:x
+        name: Source X
+        version: "1.0.0"
+        tags: [source, meteofrance, api]
+        customProperties:
+          - property: externalSource
+            value:
+              apiId: XAPI
+              host: public-api.meteofrance.fr
+              context: /public/X/v1
+              docUrl: https://confluence.example/pages/123/
+              auth: token
+          - property: changelog
+            value: []
+    """)
+    out = ToolBox(tmp_path).meteofrance_catalog(api="XAPI", topic="contract")
+    assert "Doc source" in out
+    assert "confluence.example/pages/123" in out

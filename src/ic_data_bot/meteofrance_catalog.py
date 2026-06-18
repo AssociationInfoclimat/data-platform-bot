@@ -64,6 +64,7 @@ def _to_entry(doc: dict) -> dict:
         "host": es.get("host", ""),
         "context": es.get("context", ""),
         "url_template": es.get("urlTemplate", ""),
+        "doc_url": es.get("docUrl", ""),
         "status": es.get("verified", ""),
         "auth": es.get("auth", "token"),
         "probe": es.get("probeUrl", ""),
@@ -140,6 +141,10 @@ def render_contract(e: dict) -> str:
         f"- **URL** : `{e['url_template']}`",
         f"- **Statut** : {e['status']}",
         f"- **Auth** : {e['auth']}",
+    ]
+    if e.get("doc_url"):
+        lines.append(f"- **Doc source (MF)** : {e['doc_url']}")
+    lines += [
         "",
         "**Quirks / pièges :**",
     ]
