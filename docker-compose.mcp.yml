@@ -22,7 +22,7 @@ services:
       - ${CODE_INDEX_HOST_DIR:-./code-index}:/opt/ci:ro
     restart: unless-stopped
     # 512 Mo : marge pour le back-end vectoriel lancedb (import + recherche) de search_code.
-    mem_limit: 512m
+    mem_limit: 1g
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8765/healthz"]
       interval: 30s
