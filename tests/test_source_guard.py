@@ -1,8 +1,28 @@
 """Tests de la garde de sourçage et des builders d'URL (bot.py / tools.py)."""
 from __future__ import annotations
 
-from ic_data_bot.bot import _has_source
+from ic_data_bot.bot import _has_source, _strip_fabricated_urls
 from ic_data_bot.tools import _github_web_base
+
+
+def test_strip_fabricated_sha_link():
+    src = "Voir [contracts/x.odcs.yaml](https://github.com/AssociationInfoclimat/data-platform/blob/<sha>/contracts/x.odcs.yaml) pour le détail."
+    out, changed = _strip_fabricated_urls(src)
+    assert changed
+    assert "<sha>" not in out and "https://" not in out
+    assert "contracts/x.odcs.yaml" in out  # le texte du lien est conservé
+
+
+def test_strip_fabricated_bare_url():
+    out, changed = _strip_fabricated_urls("doc : https://confluence.meteofrance.fr/x/<id>")
+    assert changed and "(lien retiré)" in out
+
+
+def test_real_urls_untouched():
+    src = ("interne : https://github.com/AssociationInfoclimat/data-platform/blob/007403b4/contracts/x.odcs.yaml "
+           "externe : https://meteo.data.gouv.fr/")
+    out, changed = _strip_fabricated_urls(src)
+    assert not changed and out == src
 
 
 def test_has_source_detects_url():

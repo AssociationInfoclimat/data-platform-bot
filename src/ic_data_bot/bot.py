@@ -42,13 +42,29 @@ SOURCE_WARNING = (
     "> ⚠️ **Réponse non sourcée** — à vérifier : des sources étaient disponibles mais "
     "ne sont pas citées ci-dessous.\n\n"
 )
+FABRICATED_WARNING = (
+    "> ⚠️ **Lien(s) inventé(s) retiré(s)** — le modèle a produit une ou plusieurs URLs "
+    "non issues des outils (donc invalides). Reformule ou demande la source exacte.\n\n"
+)
 # Détecte une source dans une réponse : URL http(s) OU citation `repo/chemin:lignes`.
 _SOURCE_RX = re.compile(r"https?://|[\w.-]+/[\w./-]+:\d+(?:-\d+)?")
+# URL fabriquée : contient un marqueur gabarit (`<sha>`, `…`, `<…>`) — jamais dans une vraie URL.
+_FABRICATED_URL_RX = re.compile(r"https?://[^\s)>\]]*[<>…][^\s)>\]]*")
 
 
 def _has_source(text: str) -> bool:
     """Vrai si la réponse cite au moins une source (URL ou chemin:lignes)."""
     return bool(_SOURCE_RX.search(text or ""))
+
+
+def _strip_fabricated_urls(text: str) -> tuple[str, bool]:
+    """Neutralise les URLs à gabarit (`<sha>`, `…`) que le modèle a inventées.
+    `[texte](url-bidon)` → `texte` ; `url-bidon` nue → `(lien retiré)`. Renvoie (texte, modifié?)."""
+    if not _FABRICATED_URL_RX.search(text or ""):
+        return text, False
+    out = re.sub(r"\[([^\]]+)\]\(" + _FABRICATED_URL_RX.pattern + r"\)", r"\1", text)
+    out = _FABRICATED_URL_RX.sub("(lien retiré)", out)
+    return out, True
 
 
 def with_redaction_notice(text: str) -> str:
@@ -279,6 +295,13 @@ class BotApp:
         # le caviardage côté outils. redact_secrets est idempotent.
         scrubbed = redact_secrets(result.text)
         had_secret = any(m in scrubbed for m in _REDACTION_MARKERS)
+        # Garde anti-URL fabriquée : le modèle invente parfois des liens (gabarit `<sha>`,
+        # Confluence deviné) au lieu de copier ceux des outils → on les neutralise + signale.
+        scrubbed, fabricated = _strip_fabricated_urls(scrubbed)
+        if fabricated:
+            scrubbed = FABRICATED_WARNING + scrubbed
+            self._log(user=user_id, status="fabricated_url", q_chars=len(question),
+                      model=model, dur_s=round(time.monotonic() - t0, 2))
         # Garde de sourçage : si des outils ont fourni des sources (URLs) mais que la réponse
         # n'en cite aucune, on signale visiblement (le modèle ignore parfois la persona).
         unsourced = bool(result.tools) and not _has_source(scrubbed)
