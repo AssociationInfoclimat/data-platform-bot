@@ -46,6 +46,10 @@ FABRICATED_WARNING = (
     "> ⚠️ **Lien(s) inventé(s) retiré(s)** — le modèle a produit une ou plusieurs URLs "
     "non issues des outils (donc invalides). Reformule ou demande la source exacte.\n\n"
 )
+EXTERNAL_WARNING = (
+    "> ⚠️ **Lien(s) externe(s) non attesté(s) retiré(s)** — une ou plusieurs URLs externes "
+    "n'apparaissent pas dans le corpus data-platform et ont été retirées.\n\n"
+)
 # Détecte une source dans une réponse : URL http(s) OU citation `repo/chemin:lignes`.
 _SOURCE_RX = re.compile(r"https?://|[\w.-]+/[\w./-]+:\d+(?:-\d+)?")
 # URL fabriquée : contient un marqueur gabarit (`<sha>`, `…`, `<…>`) — jamais dans une vraie URL.
@@ -65,6 +69,46 @@ def _strip_fabricated_urls(text: str) -> tuple[str, bool]:
     out = re.sub(r"\[([^\]]+)\]\(" + _FABRICATED_URL_RX.pattern + r"\)", r"\1", text)
     out = _FABRICATED_URL_RX.sub("(lien retiré)", out)
     return out, True
+
+
+_ANY_URL_RX = re.compile(r"https?://[^\s'\"`)<>\]}]+")
+
+
+def _sanitize_external_urls(text: str, allowed: set[str]) -> tuple[str, bool]:
+    """Retire les URLs EXTERNES absentes de la whitelist du corpus (liens inventés).
+
+    URLs internes (github.com/AssociationInfoclimat, vcs.infoclimat.net) = produites par nos
+    outils → conservées. Une URL externe est gardée si elle est attestée : forme normalisée
+    == une URL whitelistée, OU elle est un préfixe d'une URL whitelistée (citation plus
+    générale, ex. l'hôte/base). Sinon `[texte](url)`→`texte`, `url` nue→`(lien externe retiré)`."""
+    from .tools import is_internal_url, normalize_url
+
+    def _ok(url: str) -> bool:
+        if is_internal_url(url):
+            return True
+        n = normalize_url(url)
+        return any(w == n or w.startswith(n + "/") for w in allowed)
+
+    changed = False
+
+    def _repl_md(m: "re.Match") -> str:
+        nonlocal changed
+        if _ok(m.group(2)):
+            return m.group(0)
+        changed = True
+        return m.group(1)  # garde le texte du lien
+
+    out = re.sub(r"\[([^\]]+)\]\((" + _ANY_URL_RX.pattern + r")\)", _repl_md, text)
+
+    def _repl_bare(m: "re.Match") -> str:
+        nonlocal changed
+        if _ok(m.group(0)):
+            return m.group(0)
+        changed = True
+        return "(lien externe retiré)"
+
+    out = _ANY_URL_RX.sub(_repl_bare, out)
+    return out, changed
 
 
 def with_redaction_notice(text: str) -> str:
@@ -302,6 +346,17 @@ class BotApp:
             scrubbed = FABRICATED_WARNING + scrubbed
             self._log(user=user_id, status="fabricated_url", q_chars=len(question),
                       model=model, dur_s=round(time.monotonic() - t0, 2))
+        # Whitelist : ne garder que les URLs externes ATTESTÉES dans le corpus data-platform.
+        tb = getattr(agent, "toolbox", None)
+        if tb is not None and hasattr(tb, "external_url_whitelist"):
+            try:
+                scrubbed, ext_stripped = _sanitize_external_urls(scrubbed, tb.external_url_whitelist())
+            except Exception:  # noqa: BLE001 — la whitelist ne doit jamais casser une réponse
+                ext_stripped = False
+            if ext_stripped:
+                scrubbed = EXTERNAL_WARNING + scrubbed
+                self._log(user=user_id, status="external_url_stripped", q_chars=len(question),
+                          model=model, dur_s=round(time.monotonic() - t0, 2))
         # Garde de sourçage : si des outils ont fourni des sources (URLs) mais que la réponse
         # n'en cite aucune, on signale visiblement (le modèle ignore parfois la persona).
         unsourced = bool(result.tools) and not _has_source(scrubbed)

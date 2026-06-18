@@ -26,6 +26,21 @@ def _git_head_sha(repo_dir: Path) -> str:
     except (OSError, subprocess.SubprocessError):
         return ""
 
+
+_URL_RX = re.compile(r"https?://[^\s'\"`)<>\]}]+")
+# Hôtes INTERNES (URLs fabriquées par nos outils, déjà validées) — pas soumis à whitelist.
+_INTERNAL_HOST_RX = re.compile(r"https?://(github\.com/AssociationInfoclimat/|vcs\.infoclimat\.net/)")
+
+
+def normalize_url(url: str) -> str:
+    """Forme canonique pour comparer : sans fragment ni ponctuation/slash final."""
+    u = url.split("#", 1)[0].rstrip(".,;:)]}\"'")
+    return u.rstrip("/")
+
+
+def is_internal_url(url: str) -> bool:
+    return bool(_INTERNAL_HOST_RX.match(url))
+
 # ── Throttle global des appels à l'API Mistral (chat ET embeddings) ──────────
 # mistral-small-2603 limite à ~0,83 req/s (~50/min). La boucle d'outils
 # (tool_choice="any") ET les embeddings de search_code (codestral-embed) tapent le
@@ -388,6 +403,7 @@ class ToolBox:
         # figé sur le contenu réellement lu. Fallback 'main' si rev-parse échoue.
         self._dp_base = _github_web_base(os.environ.get("REPO_URL", ""))
         self._dp_ref = _git_head_sha(self.root) or "main"
+        self._ext_whitelist: set[str] | None = None  # construit paresseusement (cf. ci-dessous)
 
     def _dp_url(self, relpath: str, line: int | None = None) -> str:
         """URL GitHub d'un fichier du snapshot data-platform (vide si base inconnue)."""
@@ -395,6 +411,29 @@ class ToolBox:
             return ""
         url = f"{self._dp_base}/blob/{self._dp_ref}/{relpath}"
         return f"{url}#L{line}" if line else url
+
+    def external_url_whitelist(self) -> set[str]:
+        """Ensemble des URLs EXTERNES (normalisées) réellement présentes dans le corpus
+        data-platform (contrats, inventory, catalog…). Sert à n'autoriser, dans une réponse,
+        que des liens externes attestés — tout lien externe inventé est retiré côté bot.
+        Construit une fois (le snapshot est petit), hors overlay _ops/ et hôtes internes."""
+        if self._ext_whitelist is not None:
+            return self._ext_whitelist
+        wl: set[str] = set()
+        for fp in self.root.rglob("*"):
+            if not fp.is_file() or fp.suffix.lower() not in (".yaml", ".yml", ".md", ".json"):
+                continue
+            if self._is_ops(fp.resolve()) or ".git" in fp.parts:
+                continue
+            try:
+                text = fp.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for m in _URL_RX.findall(text):
+                if not is_internal_url(m):
+                    wl.add(normalize_url(m))
+        self._ext_whitelist = wl
+        return wl
 
     def _is_ops(self, candidate: Path) -> bool:
         return candidate == self._ops_dir or str(candidate).startswith(str(self._ops_dir) + os.sep)
