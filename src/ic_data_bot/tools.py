@@ -2,11 +2,29 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import threading
 import time
 from pathlib import Path
 
 MAX_GREP_MATCHES = 50
+
+
+def _github_web_base(remote_url: str) -> str:
+    """Base web GitHub depuis un remote (git@github.com:o/r.git | https://github.com/o/r.git).
+    "" si non GitHub (on ne fabrique pas d'URL fausse)."""
+    m = re.search(r"github\.com[:/]+([^/]+)/(.+?)(?:\.git)?/?$", remote_url.strip())
+    return f"https://github.com/{m.group(1)}/{m.group(2)}" if m else ""
+
+
+def _git_head_sha(repo_dir: Path) -> str:
+    """SHA du HEAD du clone (snapshot) ; "" si indisponible (pas un dépôt git)."""
+    try:
+        r = subprocess.run(["git", "-C", str(repo_dir), "rev-parse", "HEAD"],
+                           capture_output=True, text=True, timeout=15)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
 # ── Throttle global des appels à l'API Mistral (chat ET embeddings) ──────────
 # mistral-small-2603 limite à ~0,83 req/s (~50/min). La boucle d'outils
@@ -365,6 +383,18 @@ class ToolBox:
         # noms exotiques que redact_secrets() ne connaît pas. Injecté par bot.py/mcp_server.py.
         self.secret_scrub = secret_scrub
         self._ops_dir = (self.root / "_ops").resolve()
+        # Permalien GitHub des fichiers du snapshot data-platform (repo PUBLIC), pour citer
+        # une source exacte. Base depuis REPO_URL, ref = SHA du clone (gitsync) → permalien
+        # figé sur le contenu réellement lu. Fallback 'main' si rev-parse échoue.
+        self._dp_base = _github_web_base(os.environ.get("REPO_URL", ""))
+        self._dp_ref = _git_head_sha(self.root) or "main"
+
+    def _dp_url(self, relpath: str, line: int | None = None) -> str:
+        """URL GitHub d'un fichier du snapshot data-platform (vide si base inconnue)."""
+        if not self._dp_base:
+            return ""
+        url = f"{self._dp_base}/blob/{self._dp_ref}/{relpath}"
+        return f"{url}#L{line}" if line else url
 
     def _is_ops(self, candidate: Path) -> bool:
         return candidate == self._ops_dir or str(candidate).startswith(str(self._ops_dir) + os.sep)
@@ -383,7 +413,12 @@ class ToolBox:
             raise ToolError(f"Fichier introuvable : {path}")
         data = target.read_text(encoding="utf-8", errors="replace")
         if len(data) > self.max_bytes:
-            return data[: self.max_bytes] + f"\n\n[… tronqué à {self.max_bytes} octets]"
+            data = data[: self.max_bytes] + f"\n\n[… tronqué à {self.max_bytes} octets]"
+        rel = target.relative_to(self.root).as_posix()
+        url = self._dp_url(rel)
+        # En-tête de source (URL exacte à citer). L'overlay _ops/ n'a pas d'URL publique.
+        if url and not self._is_ops(target):
+            return f"source : {url}\n\n{data}"
         return data
 
     def grep(self, pattern: str, glob: str = "**/*") -> str:
@@ -408,7 +443,9 @@ class ToolBox:
             for n, line in enumerate(text.splitlines(), 1):
                 if rx.search(line):
                     rel = fp.relative_to(self.root)
-                    matches.append(f"{rel}:{n}: {line.strip()[:200]}")
+                    url = "" if self.public and self._is_ops(fp.resolve()) else self._dp_url(rel.as_posix(), n)
+                    loc = f"[{rel}:{n}]({url})" if url else f"{rel}:{n}"
+                    matches.append(f"{loc}: {line.strip()[:200]}")
                     if len(matches) >= MAX_GREP_MATCHES:
                         matches.append(f"[… plus de {MAX_GREP_MATCHES} correspondances, affinez la recherche]")
                         return "\n".join(matches)
@@ -475,7 +512,9 @@ class ToolBox:
                         else:
                             skipped += 1
             if hits:
-                block = f"### {rel} ({len(hits) + skipped} entrée(s))\n" + "\n---\n".join(hits)
+                _u = self._dp_url(rel)
+                _src = f"\nsource : {_u}" if _u else ""
+                block = f"### {rel} ({len(hits) + skipped} entrée(s)){_src}\n" + "\n---\n".join(hits)
                 if skipped:
                     block += f"\n[… {skipped} autre(s) entrée(s) — affine avec grep]"
                 if status_digest:
@@ -632,7 +671,10 @@ class ToolBox:
             flag = getattr(r, "flag", "") or ""
             src = getattr(r, "source", "") or ""
             tags = " ".join(t for t in (src, flag) if t)
-            head = f"### {r.location} ({r.lang}{(', ' + tags) if tags else ''})"
+            # URL exacte (permalien commit SHA) renvoyée par code_index → lien cliquable.
+            url = getattr(r, "source_url", "") or ""
+            loc = f"[{r.location}]({url})" if url else r.location
+            head = f"### {loc} ({r.lang}{(', ' + tags) if tags else ''})"
             blocks.append(f"{head}\n{snippet}")
         out = "\n\n".join(blocks)
         # Filet sémantique : un petit LLM repère les secrets que le regex ignore (noms

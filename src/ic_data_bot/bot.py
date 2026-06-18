@@ -38,6 +38,18 @@ REDACTION_NOTICE = (
     "sécurité — ce n'est pas une erreur de ma part."
 )
 
+SOURCE_WARNING = (
+    "> ⚠️ **Réponse non sourcée** — à vérifier : des sources étaient disponibles mais "
+    "ne sont pas citées ci-dessous.\n\n"
+)
+# Détecte une source dans une réponse : URL http(s) OU citation `repo/chemin:lignes`.
+_SOURCE_RX = re.compile(r"https?://|[\w.-]+/[\w./-]+:\d+(?:-\d+)?")
+
+
+def _has_source(text: str) -> bool:
+    """Vrai si la réponse cite au moins une source (URL ou chemin:lignes)."""
+    return bool(_SOURCE_RX.search(text or ""))
+
 
 def with_redaction_notice(text: str) -> str:
     """Ajoute un avis (une seule fois) si la réponse contient un marqueur de caviardage,
@@ -267,6 +279,13 @@ class BotApp:
         # le caviardage côté outils. redact_secrets est idempotent.
         scrubbed = redact_secrets(result.text)
         had_secret = any(m in scrubbed for m in _REDACTION_MARKERS)
+        # Garde de sourçage : si des outils ont fourni des sources (URLs) mais que la réponse
+        # n'en cite aucune, on signale visiblement (le modèle ignore parfois la persona).
+        unsourced = bool(result.tools) and not _has_source(scrubbed)
+        if unsourced:
+            scrubbed = SOURCE_WARNING + scrubbed
+            self._log(user=user_id, status="unsourced", q_chars=len(question),
+                      model=model, dur_s=round(time.monotonic() - t0, 2))
         self.budget.add(result.tokens)
         self.history.append(thread_id, question, scrubbed)
         self._log(user=user_id, status="ok", q_chars=len(question),
