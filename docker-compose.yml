@@ -16,7 +16,7 @@ services:
       - state:/var/lib/ic-data-bot
       - ${CODE_INDEX_HOST_DIR:-./code-index}:/opt/ci:ro
     restart: unless-stopped
-    mem_limit: 512m
+    mem_limit: 1g
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 30s
