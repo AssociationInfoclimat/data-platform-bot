@@ -926,15 +926,30 @@ class ToolBox:
                  f"{t.get('incertain', 0)} incertains"]
         if scope == "file":
             files = res.get("files", [])
+            # URL réelle par fichier (1ère URL de symbole du fichier) : le modèle DOIT citer
+            # celle-ci, jamais en reconstruire une (cf. fabrication github.com observée).
+            file_url = {}
+            for r in res["roots"]:
+                fp = f"{r['repo']}/{r['path']}"
+                if r.get("source_url") and fp not in file_url:
+                    file_url[fp] = r["source_url"]
+
+            def _flink(fp):
+                return f"[{fp}]({file_url[fp]})" if fp in file_url else fp
             if len(files) > 1:
-                shown = "\n".join(f"  • {f}" for f in files[:8])
+                shown = "\n".join(f"  • {_flink(f)}" for f in files[:8])
                 more = f"\n  … +{len(files) - 8} autres" if len(files) > 8 else ""
                 lines.append(f"⚠ {len(files)} fichiers correspondent à « {symbol} » "
                              f"(impact CUMULÉ ci-dessous) — préciser le chemin pour cibler :\n"
                              f"{shown}{more}")
             else:
-                lines.append(f"Fichier : {files[0] if files else symbol} "
-                             f"({len(res['roots'])} symboles définis)")
+                fp = files[0] if files else symbol
+                lines.append(f"Fichier : {_flink(fp)} ({len(res['roots'])} symboles définis)")
+                # symboles du fichier, avec leur URL exacte à citer
+                for r in res["roots"][:10]:
+                    loc = f"{r['repo']}/{r['path']}:{r['start_line']}"
+                    link = f"[{loc}]({r['source_url']})" if r["source_url"] else loc
+                    lines.append(f"⌖ {r['qname']} ({r['kind']}) — {link}")
         else:
             if res["ambiguous"]:
                 lines.append(f"⚠ {len(res['roots'])} définitions portent ce nom "
