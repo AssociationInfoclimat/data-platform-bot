@@ -153,11 +153,12 @@ def resolve_persona() -> str:
 # Fichiers du noyau, chargés tels quels (chemin relatif au snapshot).
 CORE_FILES = [
     "README.md",
-    "catalog/catalog.yaml",
     "catalog/glossary.md",
     "inventory/README.md",
     "lineage/namespaces.md",
 ]
+# catalog/catalog.yaml n'est PLUS inliné en entier (~3,3k tok) : on garde un SQUELETTE
+# (summarize_catalog) dans le préfixe ; le détail se récupère via search_docs/read_file.
 
 # Registres résumés (comptage), pas inclus en intégralité.
 REGISTRY_FILES = [
@@ -198,13 +199,14 @@ def _col_unit(prop: dict) -> str | None:
     return None
 
 
-def summarize_contract(path: Path) -> str:
-    """Résumé compact d'un contrat ODCS : identité, but, tables et colonnes (avec
-    leur unité quand déclarée). Les détails (usage, limitations, pièges, types) se
-    lisent via read_file — inliner les contrats entiers coûtait ~17k tokens de
-    préfixe par question. Les unités sont incluses dans l'index car une réponse
-    sans lecture confabulait l'unité (ex. °C lu comme Kelvin) : les avoir sous les
-    yeux dès le préfixe évite l'invention."""
+def summarize_contract(path: Path, compact: bool = False) -> str:
+    """Résumé d'un contrat ODCS : identité, but, et tables.
+
+    `compact=True` (squelette du préfixe) : identité + but court + NOMS de tables
+    seulement — les colonnes/unités/types/limitations se récupèrent via search_docs
+    ou read_file (le détail au milieu d'un gros préfixe est mal exploité, « lost in
+    the middle », et coûte ~6k tokens). `compact=False` (défaut, ex. !contrats) :
+    détail complet par table (colonnes + unités déclarées)."""
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8", errors="replace")) or {}
     except yaml.YAMLError:
@@ -217,23 +219,53 @@ def summarize_contract(path: Path) -> str:
     purpose = (desc.get("purpose") or "").strip() if isinstance(desc, dict) else ""
     if purpose:
         purpose = " ".join(purpose.split())
-        if len(purpose) > 280:
-            purpose = purpose[:277] + "..."
+        limit = 160 if compact else 280
+        if len(purpose) > limit:
+            purpose = purpose[:limit - 3] + "..."
         lines.append(f"  but : {purpose}")
-    for table in data.get("schema") or []:
-        if not isinstance(table, dict):
-            continue
-        kind = table.get("physicalType", "table")
-        parts = []
-        for p in table.get("properties") or []:
-            if not isinstance(p, dict):
-                continue
-            name = p.get("name", "?")
-            unit = _col_unit(p)
-            parts.append(f"{name} ({unit})" if unit else name)
-        cols = ", ".join(parts)
-        suffix = f" : {cols}" if cols else " (colonnes non versionnées)"
-        lines.append(f"  {kind} {table.get('name', '?')}{suffix}")
+    tables = [t for t in (data.get("schema") or []) if isinstance(t, dict)]
+    if compact:
+        names = ", ".join(t.get("name", "?") for t in tables)
+        if names:
+            lines.append(f"  tables : {names}")
+    else:
+        for table in tables:
+            kind = table.get("physicalType", "table")
+            parts = []
+            for p in table.get("properties") or []:
+                if not isinstance(p, dict):
+                    continue
+                name = p.get("name", "?")
+                unit = _col_unit(p)
+                parts.append(f"{name} ({unit})" if unit else name)
+            cols = ", ".join(parts)
+            suffix = f" : {cols}" if cols else " (colonnes non versionnées)"
+            lines.append(f"  {kind} {table.get('name', '?')}{suffix}")
+    return "\n".join(lines)
+
+
+def summarize_catalog(path: Path) -> str:
+    """Squelette du catalogue : 1 ligne par dataset (id, nom, statut, stockage, contrat).
+    Le détail (sheets, fallback, upstream, colonnes) se récupère via search_docs/read_file —
+    on n'inline plus le catalog.yaml entier (~3,3k tok)."""
+    if not path.is_file():
+        return ""
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return f"### Catalogue\n{path.name} : non parsable"
+    datasets = [d for d in (data.get("datasets") or []) if isinstance(d, dict)]
+    lines = [f"### Catalogue — {len(datasets)} datasets (squelette ; détail d'un dataset via "
+             "search_docs ou read_file catalog/catalog.yaml / catalog/datasets/)"]
+    for d in datasets:
+        systems = sorted({s.get("system") for s in (d.get("storage") or [])
+                          if isinstance(s, dict) and s.get("system")})
+        seg = f"- {d.get('id', '?')} ({d.get('name', '')}) [{d.get('status', '?')}]"
+        if systems:
+            seg += " — " + ", ".join(systems)
+        if d.get("contract"):
+            seg += f" — {d['contract']}"
+        lines.append(seg)
     return "\n".join(lines)
 
 
@@ -291,13 +323,18 @@ def build_system_blocks(root: Path, corrections=None) -> list[dict]:
         if content is not None:
             parts.append(f"### {rel}\n{content}")
 
-    # Index des contrats ODCS (hors _template) — même pattern que les registres :
-    # résumé dans le préfixe, détail à la demande via read_file.
+    # Catalogue : squelette (id/nom/statut/stockage/contrat), pas le YAML entier.
+    catalog = summarize_catalog(root / "catalog" / "catalog.yaml")
+    if catalog:
+        parts.append(catalog)
+
+    # Index des contrats ODCS (hors _template) — SQUELETTE (identité + but + noms de tables) ;
+    # colonnes/unités/limitations à la demande via search_docs/read_file.
     contracts_dir = root / "contracts"
     if contracts_dir.is_dir():
         files = [fp for fp in sorted(contracts_dir.glob("*.odcs.yaml"))
                  if not fp.name.startswith("_")]
-        index = [summarize_contract(fp) for fp in files]
+        index = [summarize_contract(fp, compact=True) for fp in files]
         if index:
             drafts = []
             for fp in files:
@@ -313,9 +350,10 @@ def build_system_blocks(root: Path, corrections=None) -> list[dict]:
                          if drafts else ", aucun en draft")
             parts.append(
                 f"### Index des contrats ODCS — {len(index)} contrats au total{draft_txt}. "
-                "Pour les détails d'un contrat (usage, limitations, pièges, types, "
-                "descriptions de colonnes), TOUJOURS lire le fichier complet via read_file "
-                "avant de répondre.\n\n"
+                "Ci-dessous le SQUELETTE (identité, but, noms de tables). Pour les détails d'un "
+                "contrat (colonnes, UNITÉS, types, usage, limitations, pièges), TOUJOURS "
+                "récupérer le contenu via search_docs ou read_file le fichier complet AVANT de "
+                "répondre — ne jamais inventer une unité ou un type.\n\n"
                 + "\n\n".join(index)
             )
 

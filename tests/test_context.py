@@ -58,3 +58,37 @@ def test_format_contracts_message(tmp_path):
 def test_format_contracts_message_empty(tmp_path):
     from ic_data_bot.context import format_contracts_message
     assert "Aucun dossier" in format_contracts_message(tmp_path)
+
+
+def test_summarize_catalog_skeleton(tmp_path):
+    from ic_data_bot.context import summarize_catalog
+    f = tmp_path / "catalog.yaml"
+    f.write_text(
+        "datasets:\n"
+        "  - id: foudre\n    name: Foudre\n    status: active\n"
+        "    storage:\n      - system: mariadb\n      - system: timescaledb\n"
+        "    contract: contracts/foudre.odcs.yaml\n"
+        "  - id: radar\n    name: Radar\n    status: draft\n"
+    )
+    s = summarize_catalog(f)
+    assert "2 datasets" in s
+    assert "- foudre (Foudre) [active] — mariadb, timescaledb — contracts/foudre.odcs.yaml" in s
+    assert "- radar (Radar) [draft]" in s
+
+
+def test_summarize_contract_compact_drops_columns(tmp_path):
+    from ic_data_bot.context import summarize_contract
+    f = tmp_path / "c.odcs.yaml"
+    f.write_text(
+        "name: Foudre\nstatus: active\ndomain: foudre\n"
+        "description:\n  purpose: Impacts de foudre.\n"
+        "schema:\n"
+        "  - name: foudre\n    properties:\n"
+        "      - name: dh_usec\n        customProperties:\n          - property: unit\n            value: ms\n"
+        "      - name: lat\n"
+    )
+    compact = summarize_contract(f, compact=True)
+    full = summarize_contract(f, compact=False)
+    assert "tables : foudre" in compact          # noms de tables seulement
+    assert "dh_usec" not in compact              # pas de colonnes en compact
+    assert "dh_usec (ms)" in full                # détail (unité) conservé en non-compact
