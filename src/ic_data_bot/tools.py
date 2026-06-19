@@ -349,10 +349,12 @@ SCHEMAS = [
             "les tables/pipelines) : ici ce sont les appels entre symboles du code source "
             "(PHP/Python/TS/JS, tous repos). Donne un NOM de symbole (ex. 'PluviometrieService', "
             "'get_accumulation_for_point_at_datetime', ou 'Classe.methode'). Renvoie les "
-            "symboles impactés avec repo/chemin:lignes et URL à citer. Résolution par NOM : si "
-            "plusieurs définitions portent ce nom, c'est signalé (sur-ensemble possible). "
-            "Utilise-le pour une question d'impact/refactoring, PAS pour « où est défini X » "
-            "(→ search_code/grep)."
+            "symboles impactés avec repo/chemin:lignes et URL à citer, GROUPÉS par certitude "
+            "(Certains / Probables / Incertains) et par sous-système, classés par centralité. "
+            "Présente d'abord les Certains ; pour les Probables/Incertains, NUANCE (résolution "
+            "statique par cascade — un Incertain peut être un homonyme). Si plusieurs "
+            "définitions portent le nom demandé, c'est signalé. Pour une question d'impact/"
+            "refactoring, PAS pour « où est défini X » (→ search_code/grep)."
         ),
         "input_schema": {
             "type": "object",
@@ -894,10 +896,16 @@ class ToolBox:
                     "(seuls PHP/Python/TS/JS sont couverts ; essayer le nom exact de la "
                     "fonction/classe, ou search_code/grep pour le localiser).")
         verb = "appelé par (rayon d'impact)" if direction == "callers" else "dépend de"
-        lines = [f"**{symbol}** — {verb}, profondeur {depth}"]
+        t = res.get("tiers", {})
+        lines = [f"**{symbol}** — {verb}, profondeur {depth} — "
+                 f"{t.get('certain', 0)} certains / {t.get('probable', 0)} probables / "
+                 f"{t.get('incertain', 0)} incertains"]
         if res["ambiguous"]:
             lines.append(f"⚠ {len(res['roots'])} définitions portent ce nom "
                          "(résolution par nom — sur-ensemble possible).")
+        if res.get("by_subsystem"):
+            subs = ", ".join(f"{k} ({v})" for k, v in res["by_subsystem"].items())
+            lines.append(f"Sous-systèmes touchés : {subs}")
         for r in res["roots"]:
             loc = f"{r['repo']}/{r['path']}:{r['start_line']}"
             link = f"[{loc}]({r['source_url']})" if r["source_url"] else loc
@@ -906,10 +914,19 @@ class ToolBox:
             none = "appelant interne" if direction == "callers" else "appel sortant interne"
             lines.append(f"Aucun {none} trouvé dans le périmètre indexé.")
         else:
+            # Groupé par certitude : Certain d'abord (le modèle doit nuancer le reste).
+            label = {"certain": "✓ Certains", "probable": "~ Probables", "incertain": "? Incertains"}
+            cur = None
             for n in res["impacted"]:
+                tier = n.get("tier", "incertain")
+                if tier != cur:
+                    lines.append(f"— {label.get(tier, tier)} —")
+                    cur = tier
                 loc = f"{n['repo']}/{n['path']}:{n['start_line']}"
                 link = f"[{loc}]({n['source_url']})" if n["source_url"] else loc
-                lines.append(f"{'•' * n['depth']} {n['qname']} ({n['kind']}) — {link}")
+                conf = n.get("confidence")
+                tag = f" _{conf:.2f}_" if isinstance(conf, (int, float)) else ""
+                lines.append(f"{'•' * n['depth']} {n['qname']} ({n['kind']}) — {link}{tag}")
             if res["truncated"]:
                 lines.append("… (liste tronquée — affiner avec un symbole plus précis ou depth=1)")
         out = redact_secrets("\n".join(lines))
