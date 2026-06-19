@@ -351,20 +351,43 @@ SCHEMAS = [
             "'get_accumulation_for_point_at_datetime', ou 'Classe.methode'). Renvoie les "
             "symboles impactés avec repo/chemin:lignes et URL à citer, GROUPÉS par certitude "
             "(Certains / Probables / Incertains) et par sous-système, classés par centralité. "
-            "Présente d'abord les Certains ; pour les Probables/Incertains, NUANCE (résolution "
-            "statique par cascade — un Incertain peut être un homonyme). Si plusieurs "
-            "définitions portent le nom demandé, c'est signalé. Pour une question d'impact/"
-            "refactoring, PAS pour « où est défini X » (→ search_code/grep)."
+            "ACCEPTE AUSSI UN CHEMIN DE FICHIER (ex. 'api/.../mf.controller.php') → impact "
+            "CUMULÉ de tous les symboles du fichier (« qu'est-ce qui casse si je supprime ce "
+            "fichier »). Présente d'abord les Certains ; pour les Probables/Incertains, NUANCE "
+            "(résolution statique — un Incertain peut être un homonyme). Ambiguïté (nom ou "
+            "fichier multiple) signalée. Pour une question d'impact/refactoring, PAS pour « où "
+            "est défini X » (→ search_code/grep)."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "symbol": {"type": "string", "description": "Nom du symbole (fonction/classe/méthode), ou 'Classe.methode'"},
+                "symbol": {"type": "string", "description": "Nom du symbole (fonction/classe/méthode, ou 'Classe.methode'), OU un chemin de fichier"},
                 "direction": {"type": "string", "enum": ["callers", "callees"],
                               "description": "callers = qui appelle X (impact, défaut) ; callees = ce dont X dépend"},
                 "depth": {"type": "integer", "description": "Profondeur de parcours 1-4 (défaut 2)"},
             },
             "required": ["symbol"],
+        },
+    },
+    {
+        "name": "code_hotspots",
+        "description": (
+            "HUBS du code : les symboles les plus STRUCTURANTS (les plus centraux / les plus "
+            "appelés) du graphe d'appels — répond à « quel est le symbole le plus utilisé », "
+            "« quelles sont les fonctions critiques », « par quoi tout passe ». Classement par "
+            "centralité PageRank (défaut) ou fan-in (nombre d'appelants), filtrable par repo ou "
+            "sous-système. Changer un hub a un large impact. Renvoie nom/chemin:lignes + URL."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "top": {"type": "integer", "description": "Nombre de hubs à renvoyer (défaut 15, max 40)"},
+                "repo": {"type": "string", "description": "Limiter à un repo (ex. site-infoclimat) — optionnel"},
+                "subsystem": {"type": "string", "description": "Limiter à un sous-système 'repo/dossier' (ex. 'site-infoclimat/api') — optionnel"},
+                "by": {"type": "string", "enum": ["centrality", "fan_in"],
+                       "description": "centrality = importance PageRank (défaut) ; fan_in = nb d'appelants"},
+            },
+            "required": [],
         },
     },
     {
@@ -892,24 +915,37 @@ class ToolBox:
         except Exception as exc:  # noqa: BLE001
             raise ToolError(f"Parcours du graphe impossible : {type(exc).__name__}: {exc}")
         if not res["roots"]:
-            return (f"Symbole « {symbol} » introuvable dans le graphe d'appels "
-                    "(seuls PHP/Python/TS/JS sont couverts ; essayer le nom exact de la "
-                    "fonction/classe, ou search_code/grep pour le localiser).")
+            return (f"« {symbol} » introuvable dans le graphe d'appels (seuls PHP/Python/TS/JS "
+                    "sont couverts ; donner le nom EXACT d'une fonction/classe/méthode, ou un "
+                    "chemin de fichier, ou utiliser search_code/grep pour le localiser).")
         verb = "appelé par (rayon d'impact)" if direction == "callers" else "dépend de"
         t = res.get("tiers", {})
+        scope = res.get("scope", "symbol")
         lines = [f"**{symbol}** — {verb}, profondeur {depth} — "
                  f"{t.get('certain', 0)} certains / {t.get('probable', 0)} probables / "
                  f"{t.get('incertain', 0)} incertains"]
-        if res["ambiguous"]:
-            lines.append(f"⚠ {len(res['roots'])} définitions portent ce nom "
-                         "(résolution par nom — sur-ensemble possible).")
+        if scope == "file":
+            files = res.get("files", [])
+            if len(files) > 1:
+                shown = "\n".join(f"  • {f}" for f in files[:8])
+                more = f"\n  … +{len(files) - 8} autres" if len(files) > 8 else ""
+                lines.append(f"⚠ {len(files)} fichiers correspondent à « {symbol} » "
+                             f"(impact CUMULÉ ci-dessous) — préciser le chemin pour cibler :\n"
+                             f"{shown}{more}")
+            else:
+                lines.append(f"Fichier : {files[0] if files else symbol} "
+                             f"({len(res['roots'])} symboles définis)")
+        else:
+            if res["ambiguous"]:
+                lines.append(f"⚠ {len(res['roots'])} définitions portent ce nom "
+                             "(résolution par nom — sur-ensemble possible).")
+            for r in res["roots"]:
+                loc = f"{r['repo']}/{r['path']}:{r['start_line']}"
+                link = f"[{loc}]({r['source_url']})" if r["source_url"] else loc
+                lines.append(f"⌖ {r['qname']} ({r['kind']}) — {link}")
         if res.get("by_subsystem"):
             subs = ", ".join(f"{k} ({v})" for k, v in res["by_subsystem"].items())
             lines.append(f"Sous-systèmes touchés : {subs}")
-        for r in res["roots"]:
-            loc = f"{r['repo']}/{r['path']}:{r['start_line']}"
-            link = f"[{loc}]({r['source_url']})" if r["source_url"] else loc
-            lines.append(f"⌖ {r['qname']} ({r['kind']}) — {link}")
         if not res["impacted"]:
             none = "appelant interne" if direction == "callers" else "appel sortant interne"
             lines.append(f"Aucun {none} trouvé dans le périmètre indexé.")
@@ -929,6 +965,41 @@ class ToolBox:
                 lines.append(f"{'•' * n['depth']} {n['qname']} ({n['kind']}) — {link}{tag}")
             if res["truncated"]:
                 lines.append("… (liste tronquée — affiner avec un symbole plus précis ou depth=1)")
+        out = redact_secrets("\n".join(lines))
+        if self.secret_scrub:
+            out = self.secret_scrub(out)
+        return out
+
+    def code_hotspots(self, top: int = 15, repo: str | None = None,
+                      subsystem: str | None = None, by: str = "centrality") -> str:
+        """Hubs du code : symboles les plus centraux/appelés (centralité PageRank ou fan-in),
+        depuis le graphe d'appels. Mêmes gardes que code_impact (pur AST, code privé)."""
+        if self.public and os.environ.get("CODE_INDEX_PUBLIC", "").lower() not in ("1", "true", "yes"):
+            raise ToolError("Graphe de code désactivé en mode public.")
+        by = "fan_in" if str(by).lower() in ("fan_in", "fanin", "appels", "callers") else "centrality"
+        try:
+            top = max(1, min(int(top or 15), 40))
+        except (TypeError, ValueError):
+            top = 15
+        graph_mod, g, sidecar = self._load_graph()
+        try:
+            res = graph_mod.code_hotspots(g, top=top, repo=repo or None,
+                                          subsystem=subsystem or None, by=by, sidecar=sidecar)
+        except Exception as exc:  # noqa: BLE001
+            raise ToolError(f"Calcul des hubs impossible : {type(exc).__name__}: {exc}")
+        if not res["hotspots"]:
+            return ("Aucun symbole (filtre trop restrictif ? repo/sous-système inexistant, "
+                    "ou graphe non déployé).")
+        metric_lbl = "centralité (PageRank)" if res["by"] == "centrality" else "nb d'appelants (fan-in)"
+        scope = (f" — repo {repo}" if repo else "") + (f" — {subsystem}" if subsystem else "")
+        lines = [f"**Hubs du code** (top {len(res['hotspots'])} par {metric_lbl}{scope}) — "
+                 "les symboles les plus structurants ; changer l'un d'eux a un large impact :"]
+        for n in res["hotspots"]:
+            loc = f"{n['repo']}/{n['path']}:{n['start_line']}"
+            link = f"[{loc}]({n['source_url']})" if n["source_url"] else loc
+            m = n["metric"]
+            mstr = f"{m:.4f}" if isinstance(m, float) else f"{m} appelants"
+            lines.append(f"• {n['qname']} ({n['kind']}) — {mstr} — {link}")
         out = redact_secrets("\n".join(lines))
         if self.secret_scrub:
             out = self.secret_scrub(out)
@@ -993,6 +1064,11 @@ class ToolBox:
             return self.code_impact(tool_input["symbol"],
                                     tool_input.get("direction") or "callers",
                                     int(tool_input.get("depth") or 2))
+        if name == "code_hotspots":
+            return self.code_hotspots(int(tool_input.get("top") or 15),
+                                      tool_input.get("repo") or None,
+                                      tool_input.get("subsystem") or None,
+                                      tool_input.get("by") or "centrality")
         if name == "kestra_recent":
             if self.kestra_log is None:
                 raise ToolError("Événements Kestra non configurés sur ce déploiement.")
