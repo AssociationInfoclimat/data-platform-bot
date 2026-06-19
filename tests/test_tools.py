@@ -61,7 +61,8 @@ def test_dispatch_grep_redacts_secrets(snapshot):
 def test_schemas_shape():
     names = {t["name"] for t in SCHEMAS}
     assert names == {"read_file", "grep", "lineage", "kestra_recent", "volumetrie",
-                     "schema", "search_code", "search_docs", "meteofrance_catalog"}
+                     "schema", "search_code", "search_docs", "code_impact",
+                     "meteofrance_catalog"}
 
 
 def test_search_code_disabled_by_default(tmp_path, monkeypatch):
@@ -97,6 +98,30 @@ def test_search_code_empty_query_rejected(tmp_path, monkeypatch):
     box = ToolBox(tmp_path, public=False)  # interne : pas de garde public
     with pytest.raises(ToolError):
         box.search_code("   ")
+
+
+def test_code_impact_refused_in_public_mode(tmp_path, monkeypatch):
+    """Le graphe expose la structure du code (repos privés) : refusé en mode public sans
+    opt-in CODE_INDEX_PUBLIC, AVANT tout chargement d'artefact."""
+    monkeypatch.delenv("CODE_INDEX_PUBLIC", raising=False)
+    box = ToolBox(tmp_path, public=True)
+    with pytest.raises(ToolError):
+        box.code_impact("PluviometrieService")
+
+
+def test_code_impact_empty_symbol_rejected(tmp_path):
+    box = ToolBox(tmp_path, public=False)
+    with pytest.raises(ToolError):
+        box.code_impact("   ")
+
+
+def test_code_impact_graph_not_deployed(tmp_path, monkeypatch):
+    """Sans artefact graphe (GRAPH_INDEX_PATH inexistant), l'outil le signale proprement."""
+    monkeypatch.setenv("GRAPH_INDEX_PATH", str(tmp_path / "absent.json.gz"))
+    monkeypatch.setenv("CODE_INDEX_TOOLS_DIR", str(tmp_path))  # code_index importable ? sinon ToolError aussi
+    box = ToolBox(tmp_path, public=False)
+    with pytest.raises(ToolError):
+        box.code_impact("Foo")
 
 
 def _lineage_snapshot(tmp_path):
