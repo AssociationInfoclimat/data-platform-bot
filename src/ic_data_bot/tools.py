@@ -335,7 +335,7 @@ SCHEMAS = [
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Question en langage naturel sur la gouvernance data"},
-                "k": {"type": "integer", "description": "Nombre d'entrées à renvoyer (défaut 6)"},
+                "k": {"type": "integer", "description": "Nombre d'entrées à renvoyer (défaut 8)"},
             },
             "required": ["query"],
         },
@@ -800,7 +800,7 @@ class ToolBox:
             out = self.secret_scrub(out)
         return out
 
-    def search_docs(self, query: str, k: int = 6) -> str:
+    def search_docs(self, query: str, k: int = 8) -> str:
         """Recherche SÉMANTIQUE dans la gouvernance data-platform (contrats ODCS, inventory,
         catalog, glossaire, audits) — table `docs_chunks` (mistral-embed), via
         `code_index.search_docs()`. Complément des outils lexicaux grep/lineage : ici on
@@ -824,7 +824,9 @@ class ToolBox:
             raise ToolError("Index docs indisponible : module code_index introuvable "
                             "(définir CODE_INDEX_TOOLS_DIR vers data-platform/tools).")
         try:
-            k = max(1, min(int(k or 6), 20))
+            # défaut 8 (> search_code) : depuis l'allègement du prompt, le détail gouvernance
+            # vit dans le retrieval → on privilégie le rappel (chunks docs petits, peu de bruit).
+            k = max(1, min(int(k or 8), 20))
             mistral_throttle()  # l'embedding mistral-embed de la requête tape le quota Mistral
             results = _search(query, k=k)
         except Exception as exc:  # noqa: BLE001 — surface l'erreur à l'agent
@@ -1074,7 +1076,7 @@ class ToolBox:
             return self.search_code(tool_input["query"], tool_input.get("repo") or None,
                                     int(tool_input.get("k") or 6))
         if name == "search_docs":
-            return self.search_docs(tool_input["query"], int(tool_input.get("k") or 6))
+            return self.search_docs(tool_input["query"], int(tool_input.get("k") or 8))
         if name == "code_impact":
             return self.code_impact(tool_input["symbol"],
                                     tool_input.get("direction") or "callers",
