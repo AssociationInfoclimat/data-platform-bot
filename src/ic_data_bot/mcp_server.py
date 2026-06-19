@@ -204,6 +204,16 @@ if _ci_on("CODE_INDEX_ENABLED") and _ci_on("CODE_INDEX_PUBLIC"):
         return _traced("search_code", {"query": query, "repo": repo},
                        lambda: _safe(_tb.search_code, query, repo or None, k))
 
+# Recherche sémantique de la GOUVERNANCE (corpus PUBLIC data-platform) : interrupteur maître
+# DOCS_INDEX_ENABLED (lancedb requiert AVX2). Pas d'opt-in public (corpus déjà public).
+if _ci_on("DOCS_INDEX_ENABLED"):
+    @mcp.tool()
+    def search_docs(query: str, k: int = 6) -> str:
+        """Recherche SÉMANTIQUE dans la gouvernance data-platform (contrats, inventory,
+        catalog, glossaire) — complément de grep/lineage ; renvoie chemin:lignes + URL."""
+        return _traced("search_docs", {"query": query},
+                       lambda: _safe(_tb.search_docs, query, k))
+
 
 # ── Resource (lecture par URI) ──────────────────────────────────────────────
 @mcp.resource("dataplatform://{path}")
