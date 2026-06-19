@@ -62,7 +62,7 @@ def test_schemas_shape():
     names = {t["name"] for t in SCHEMAS}
     assert names == {"read_file", "grep", "lineage", "kestra_recent", "volumetrie",
                      "schema", "search_code", "search_docs", "code_impact",
-                     "meteofrance_catalog"}
+                     "code_hotspots", "meteofrance_catalog"}
 
 
 def test_search_code_disabled_by_default(tmp_path, monkeypatch):
@@ -122,6 +122,13 @@ def test_code_impact_graph_not_deployed(tmp_path, monkeypatch):
     box = ToolBox(tmp_path, public=False)
     with pytest.raises(ToolError):
         box.code_impact("Foo")
+
+
+def test_code_hotspots_refused_in_public_mode(tmp_path, monkeypatch):
+    monkeypatch.delenv("CODE_INDEX_PUBLIC", raising=False)
+    box = ToolBox(tmp_path, public=True)
+    with pytest.raises(ToolError):
+        box.code_hotspots()
 
 
 def _lineage_snapshot(tmp_path):

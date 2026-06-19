@@ -222,9 +222,18 @@ if _ci_on("GRAPH_INDEX_ENABLED") and _ci_on("CODE_INDEX_PUBLIC"):
     def code_impact(symbol: str, direction: str = "callers", depth: int = 2) -> str:
         """Graphe d'appels : « qu'est-ce qui casse si je change X » (direction=callers, rayon
         d'impact) ou « de quoi dépend X » (callees). Donne un nom de symbole (fonction/classe/
-        méthode, ou Classe.methode) ; renvoie les symboles impactés avec repo/chemin:lignes."""
+        méthode, ou Classe.methode) OU un chemin de fichier (impact cumulé du fichier) ; renvoie
+        les symboles impactés avec repo/chemin:lignes, groupés par certitude."""
         return _traced("code_impact", {"symbol": symbol, "direction": direction},
                        lambda: _safe(_tb.code_impact, symbol, direction, depth))
+
+    @mcp.tool()
+    def code_hotspots(top: int = 15, repo: str = "", subsystem: str = "", by: str = "centrality") -> str:
+        """Hubs du code : symboles les plus centraux/appelés (centralité PageRank ou fan-in) du
+        graphe d'appels — « quel est le symbole le plus utilisé », « les fonctions critiques ».
+        Filtrable par repo/sous-système."""
+        return _traced("code_hotspots", {"top": top, "repo": repo, "by": by},
+                       lambda: _safe(_tb.code_hotspots, top, repo or None, subsystem or None, by))
 
 
 # ── Resource (lecture par URI) ──────────────────────────────────────────────
