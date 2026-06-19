@@ -214,6 +214,18 @@ if _ci_on("DOCS_INDEX_ENABLED"):
         return _traced("search_docs", {"query": query},
                        lambda: _safe(_tb.search_docs, query, k))
 
+# Graphe d'appels (Phase 4) : pur AST (artefact JSON, NI lancedb/AVX2 NI API). Structure du
+# code des repos PRIVÉS → opt-in CODE_INDEX_PUBLIC ; interrupteur GRAPH_INDEX_ENABLED (l'artefact
+# graphe doit être déployé, cf. GRAPH_INDEX_PATH).
+if _ci_on("GRAPH_INDEX_ENABLED") and _ci_on("CODE_INDEX_PUBLIC"):
+    @mcp.tool()
+    def code_impact(symbol: str, direction: str = "callers", depth: int = 2) -> str:
+        """Graphe d'appels : « qu'est-ce qui casse si je change X » (direction=callers, rayon
+        d'impact) ou « de quoi dépend X » (callees). Donne un nom de symbole (fonction/classe/
+        méthode, ou Classe.methode) ; renvoie les symboles impactés avec repo/chemin:lignes."""
+        return _traced("code_impact", {"symbol": symbol, "direction": direction},
+                       lambda: _safe(_tb.code_impact, symbol, direction, depth))
+
 
 # ── Resource (lecture par URI) ──────────────────────────────────────────────
 @mcp.resource("dataplatform://{path}")

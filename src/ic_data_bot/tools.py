@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -337,6 +338,31 @@ SCHEMAS = [
                 "k": {"type": "integer", "description": "Nombre d'entrées à renvoyer (défaut 6)"},
             },
             "required": ["query"],
+        },
+    },
+    {
+        "name": "code_impact",
+        "description": (
+            "GRAPHE D'APPELS du code : « qu'est-ce qui casse si je change X ? » "
+            "(direction=callers, RAYON D'IMPACT d'une fonction/classe/méthode) ou « de quoi "
+            "dépend X ? » (direction=callees). Pendant CODE du `lineage` DATA (qui, lui, trace "
+            "les tables/pipelines) : ici ce sont les appels entre symboles du code source "
+            "(PHP/Python/TS/JS, tous repos). Donne un NOM de symbole (ex. 'PluviometrieService', "
+            "'get_accumulation_for_point_at_datetime', ou 'Classe.methode'). Renvoie les "
+            "symboles impactés avec repo/chemin:lignes et URL à citer. Résolution par NOM : si "
+            "plusieurs définitions portent ce nom, c'est signalé (sur-ensemble possible). "
+            "Utilise-le pour une question d'impact/refactoring, PAS pour « où est défini X » "
+            "(→ search_code/grep)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Nom du symbole (fonction/classe/méthode), ou 'Classe.methode'"},
+                "direction": {"type": "string", "enum": ["callers", "callees"],
+                              "description": "callers = qui appelle X (impact, défaut) ; callees = ce dont X dépend"},
+                "depth": {"type": "integer", "description": "Profondeur de parcours 1-4 (défaut 2)"},
+            },
+            "required": ["symbol"],
         },
     },
     {
@@ -791,6 +817,106 @@ class ToolBox:
             out = self.secret_scrub(out)
         return out
 
+    def _default_graph_path(self) -> str:
+        """Chemin par défaut de l'artefact graphe : à côté de l'index LanceDB (CODE_INDEX_DIR),
+        sinon dans le module code_index du snapshot."""
+        ci = os.environ.get("CODE_INDEX_DIR")
+        if ci:
+            return str(Path(ci).parent / "graph.json.gz")
+        return str(self.root / "tools" / "code_index" / "graph.json.gz")
+
+    def _graph_sidecar(self):
+        """Sidecar méta (web_base/repo_ref par repo) pour les URLs source du graphe ; chargé
+        une fois (None si CODE_INDEX_META absent → résultats sans URL plutôt qu'inventées)."""
+        if hasattr(self, "_sidecar_cache"):
+            return self._sidecar_cache
+        sc = None
+        meta = os.environ.get("CODE_INDEX_META")
+        if meta and Path(meta).exists():
+            try:
+                sc = json.loads(Path(meta).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                sc = None
+        self._sidecar_cache = sc
+        return sc
+
+    def _load_graph(self):
+        """(module graph, graphe chargé+inversé, sidecar). Le graphe est mis en cache et
+        rechargé si l'artefact change (mtime) — pas de lancedb ni d'API ici (pur JSON/AST)."""
+        import sys
+
+        tools_dir = os.environ.get("CODE_INDEX_TOOLS_DIR") or str(self.root / "tools")
+        if tools_dir not in sys.path:
+            sys.path.insert(0, tools_dir)
+        try:
+            from code_index import graph as graph_mod
+        except ImportError:
+            raise ToolError("Graphe de code indisponible : module code_index introuvable "
+                            "(définir CODE_INDEX_TOOLS_DIR vers data-platform/tools).")
+        path = os.environ.get("GRAPH_INDEX_PATH") or self._default_graph_path()
+        p = Path(path)
+        if not p.exists():
+            raise ToolError(f"Graphe d'appels non déployé ({path} absent). Le construire : "
+                            "python -m code_index.graph build --out graph.json.gz.")
+        mtime = p.stat().st_mtime
+        cache = getattr(self, "_graph_cache", None)
+        if cache and cache[0] == str(p) and cache[1] == mtime:
+            g = cache[2]
+        else:
+            g = graph_mod.load_graph(p)
+            self._graph_cache = (str(p), mtime, g)
+        return graph_mod, g, self._graph_sidecar()
+
+    def code_impact(self, symbol: str, direction: str = "callers", depth: int = 2) -> str:
+        """Graphe d'appels : rayon d'impact (callers) ou dépendances (callees) d'un symbole.
+
+        Pur AST (artefact JSON pré-construit) : ni lancedb/AVX2 ni appel API. Le code
+        applicatif vient de repos PRIVÉS → refusé en mode public sauf CODE_INDEX_PUBLIC."""
+        if self.public and os.environ.get("CODE_INDEX_PUBLIC", "").lower() not in ("1", "true", "yes"):
+            raise ToolError("Graphe de code désactivé en mode public (structure du code des "
+                            "repos privés non exposée).")
+        symbol = (symbol or "").strip()
+        if not symbol:
+            raise ToolError("Symbole vide.")
+        direction = "callees" if str(direction).lower().startswith("callee") else "callers"
+        try:
+            depth = max(1, min(int(depth or 2), 4))
+        except (TypeError, ValueError):
+            depth = 2
+        graph_mod, g, sidecar = self._load_graph()
+        try:
+            res = graph_mod.code_impact(g, symbol, direction=direction, depth=depth,
+                                        sidecar=sidecar)
+        except Exception as exc:  # noqa: BLE001
+            raise ToolError(f"Parcours du graphe impossible : {type(exc).__name__}: {exc}")
+        if not res["roots"]:
+            return (f"Symbole « {symbol} » introuvable dans le graphe d'appels "
+                    "(seuls PHP/Python/TS/JS sont couverts ; essayer le nom exact de la "
+                    "fonction/classe, ou search_code/grep pour le localiser).")
+        verb = "appelé par (rayon d'impact)" if direction == "callers" else "dépend de"
+        lines = [f"**{symbol}** — {verb}, profondeur {depth}"]
+        if res["ambiguous"]:
+            lines.append(f"⚠ {len(res['roots'])} définitions portent ce nom "
+                         "(résolution par nom — sur-ensemble possible).")
+        for r in res["roots"]:
+            loc = f"{r['repo']}/{r['path']}:{r['start_line']}"
+            link = f"[{loc}]({r['source_url']})" if r["source_url"] else loc
+            lines.append(f"⌖ {r['qname']} ({r['kind']}) — {link}")
+        if not res["impacted"]:
+            none = "appelant interne" if direction == "callers" else "appel sortant interne"
+            lines.append(f"Aucun {none} trouvé dans le périmètre indexé.")
+        else:
+            for n in res["impacted"]:
+                loc = f"{n['repo']}/{n['path']}:{n['start_line']}"
+                link = f"[{loc}]({n['source_url']})" if n["source_url"] else loc
+                lines.append(f"{'•' * n['depth']} {n['qname']} ({n['kind']}) — {link}")
+            if res["truncated"]:
+                lines.append("… (liste tronquée — affiner avec un symbole plus précis ou depth=1)")
+        out = redact_secrets("\n".join(lines))
+        if self.secret_scrub:
+            out = self.secret_scrub(out)
+        return out
+
     def meteofrance_catalog(self, api: str = "", topic: str = "contract", probe: bool = False,
                             since: str = "") -> str:
         from . import meteofrance_catalog as cat
@@ -846,6 +972,10 @@ class ToolBox:
                                     int(tool_input.get("k") or 6))
         if name == "search_docs":
             return self.search_docs(tool_input["query"], int(tool_input.get("k") or 6))
+        if name == "code_impact":
+            return self.code_impact(tool_input["symbol"],
+                                    tool_input.get("direction") or "callers",
+                                    int(tool_input.get("depth") or 2))
         if name == "kestra_recent":
             if self.kestra_log is None:
                 raise ToolError("Événements Kestra non configurés sur ce déploiement.")
