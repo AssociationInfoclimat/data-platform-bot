@@ -320,6 +320,26 @@ SCHEMAS = [
         },
     },
     {
+        "name": "search_docs",
+        "description": (
+            "Recherche SÉMANTIQUE dans la GOUVERNANCE data-platform (contrats ODCS, inventory "
+            "tables/pipelines/sources, catalog, glossaire, audits) via un index vectoriel. "
+            "Pour une question DATA ouverte/conceptuelle où tu ne connais pas le nom exact "
+            "(« quel contrat parle d'anti-scraping ? », « quels pipelines alimentent la "
+            "climato ? ») — retrouve l'entrée par le SENS. Complémentaire de `grep` (motif "
+            "exact) et `lineage` (impact par nom). Renvoie les entrées les plus pertinentes "
+            "avec chemin:lignes et URL GitHub à citer. Poser la question telle quelle."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Question en langage naturel sur la gouvernance data"},
+                "k": {"type": "integer", "description": "Nombre d'entrées à renvoyer (défaut 6)"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "schema",
         "description": (
             "DDL RÉEL d'une table (CREATE TABLE) depuis les snapshots de schéma "
@@ -729,6 +749,48 @@ class ToolBox:
             out = self.secret_scrub(out)
         return out
 
+    def search_docs(self, query: str, k: int = 6) -> str:
+        """Recherche SÉMANTIQUE dans la gouvernance data-platform (contrats ODCS, inventory,
+        catalog, glossaire, audits) — table `docs_chunks` (mistral-embed), via
+        `code_index.search_docs()`. Complément des outils lexicaux grep/lineage : ici on
+        retrouve par le SENS une entrée même sans connaître son nom exact.
+
+        Même interrupteur maître `DOCS_INDEX_ENABLED` (le back-end lancedb requiert AVX2 — cf.
+        search_code). Corpus PUBLIC (repo data-platform) → pas de restriction mode public."""
+        if os.environ.get("DOCS_INDEX_ENABLED", "").lower() not in ("1", "true", "yes"):
+            raise ToolError("Recherche docs désactivée (DOCS_INDEX_ENABLED non défini ; "
+                            "le back-end vectoriel requiert un CPU avec AVX2).")
+        if not query or not query.strip():
+            raise ToolError("Requête vide.")
+        import sys
+
+        tools_dir = os.environ.get("CODE_INDEX_TOOLS_DIR") or str(self.root / "tools")
+        if tools_dir not in sys.path:
+            sys.path.insert(0, tools_dir)
+        try:
+            from code_index import search_docs as _search
+        except ImportError:
+            raise ToolError("Index docs indisponible : module code_index introuvable "
+                            "(définir CODE_INDEX_TOOLS_DIR vers data-platform/tools).")
+        try:
+            k = max(1, min(int(k or 6), 20))
+            mistral_throttle()  # l'embedding mistral-embed de la requête tape le quota Mistral
+            results = _search(query, k=k)
+        except Exception as exc:  # noqa: BLE001 — surface l'erreur à l'agent
+            raise ToolError(f"Recherche docs impossible : {type(exc).__name__}: {exc}")
+        if not results:
+            return "Aucune entrée de gouvernance pertinente (index docs non construit ?)."
+        blocks = []
+        for r in results:
+            snippet = redact_secrets("\n".join(r.text.splitlines()[:20]))
+            url = getattr(r, "source_url", "") or ""
+            loc = f"[{r.location}]({url})" if url else r.location
+            blocks.append(f"### {loc}\n{snippet}")
+        out = "\n\n".join(blocks)
+        if self.secret_scrub:
+            out = self.secret_scrub(out)
+        return out
+
     def meteofrance_catalog(self, api: str = "", topic: str = "contract", probe: bool = False,
                             since: str = "") -> str:
         from . import meteofrance_catalog as cat
@@ -782,6 +844,8 @@ class ToolBox:
         if name == "search_code":
             return self.search_code(tool_input["query"], tool_input.get("repo") or None,
                                     int(tool_input.get("k") or 6))
+        if name == "search_docs":
+            return self.search_docs(tool_input["query"], int(tool_input.get("k") or 6))
         if name == "kestra_recent":
             if self.kestra_log is None:
                 raise ToolError("Événements Kestra non configurés sur ce déploiement.")

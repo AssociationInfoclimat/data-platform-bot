@@ -61,7 +61,7 @@ def test_dispatch_grep_redacts_secrets(snapshot):
 def test_schemas_shape():
     names = {t["name"] for t in SCHEMAS}
     assert names == {"read_file", "grep", "lineage", "kestra_recent", "volumetrie",
-                     "schema", "search_code", "meteofrance_catalog"}
+                     "schema", "search_code", "search_docs", "meteofrance_catalog"}
 
 
 def test_search_code_disabled_by_default(tmp_path, monkeypatch):
@@ -71,6 +71,14 @@ def test_search_code_disabled_by_default(tmp_path, monkeypatch):
     box = ToolBox(tmp_path, public=False)
     with pytest.raises(ToolError):
         box.search_code("où est le routing")
+
+
+def test_search_docs_disabled_by_default(tmp_path, monkeypatch):
+    """Interrupteur maître DOCS_INDEX_ENABLED : refus avant tout import lancedb."""
+    monkeypatch.delenv("DOCS_INDEX_ENABLED", raising=False)
+    box = ToolBox(tmp_path, public=False)
+    with pytest.raises(ToolError):
+        box.search_docs("quel contrat parle d'anti-scraping")
 
 
 def test_search_code_refused_in_public_mode(tmp_path, monkeypatch):
