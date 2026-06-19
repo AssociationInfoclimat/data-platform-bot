@@ -370,3 +370,14 @@ questions:
       - "fournit une URL externe Météo-France officielle (doc Confluence OpenDataMeteoFrance sur confluence-meteofrance.atlassian.net, ou endpoint public-api.meteofrance.fr/public/DPObs)"
       - "fournit le lien interne du contrat data-platform (source-meteofrance-dpobs sur github.com/AssociationInfoclimat/data-platform)"
       - "ne cite aucune URL à domaine inventé (ex. confluence.meteo.fr) ni de gabarit non résolu (<sha>)"
+
+  # ── P. Recherche sémantique gouvernance (force search_docs) ──
+  - id: P1
+    category: docsearch
+    difficulty: medium
+    mechanism: "search_docs (index docs_chunks, recherche sémantique gouvernance)"
+    question: "Y a-t-il dans la gouvernance des jeux de données ou contrats qui concernent la foudre / les impacts d'éclairs ?"
+    criteria:
+      - "identifie l'objet foudre (table V5.foudre et/ou contrat foudre.odcs.yaml)"
+      - "cite une source de gouvernance (chemin data-platform et/ou URL GitHub)"
+      - "s'appuie sur un outil de retrieval (search_docs/grep/lineage), pas une réponse de tête"
