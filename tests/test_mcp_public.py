@@ -47,6 +47,33 @@ def test_mcp_server_imports_and_builds_app():
     assert app is not None
 
 
+def test_graph_tools_gated_like_code_impact(monkeypatch):
+    """data_to_code/code_path/dead_code partagent la grille de code_impact
+    (GRAPH_INDEX_ENABLED ET CODE_INDEX_PUBLIC) : enregistrés ssi les deux flags sont posés."""
+    import asyncio
+    import importlib
+
+    from ic_data_bot import mcp_server
+
+    def _registered(enable_graph: bool):
+        monkeypatch.setenv("GRAPH_INDEX_ENABLED", "1" if enable_graph else "0")
+        monkeypatch.setenv("CODE_INDEX_PUBLIC", "1")
+        mod = importlib.reload(mcp_server)
+        names = {t.name for t in asyncio.run(mod.mcp.list_tools())}
+        return names
+
+    on = _registered(True)
+    assert {"data_to_code", "code_path", "dead_code"} <= on
+    assert "code_impact" in on  # même grille
+    off = _registered(False)
+    assert not ({"data_to_code", "code_path", "dead_code"} & off)
+    assert "code_impact" not in off
+    # restaure le module dans son état par défaut pour les autres tests
+    monkeypatch.delenv("GRAPH_INDEX_ENABLED", raising=False)
+    monkeypatch.delenv("CODE_INDEX_PUBLIC", raising=False)
+    importlib.reload(mcp_server)
+
+
 def test_valid_tokens_multi(monkeypatch):
     from ic_data_bot import mcp_server
     monkeypatch.setenv("MCP_BEARER_TOKEN", "main")
