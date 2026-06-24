@@ -184,13 +184,23 @@ def test_data_to_code_enriches_with_graph(tmp_path, monkeypatch):
     impact = {"roots": [_node("seed")], "impacted": [_node("CallerX", path="api/c.php")],
               "scope": "file", "files": ["site-infoclimat/cron/recup_blitzortung.php"],
               "ambiguous": False, "truncated": False, "by_subsystem": {}, "tiers": {}}
+    seen_syms = []
+
+    def _capt_impact(g, sym, **k):
+        seen_syms.append(sym)
+        return impact
+
     _patch_graph(box, monkeypatch,
                  resolve_file=lambda g, p: ["seed"] if "recup_blitzortung" in p else [],
-                 code_impact=lambda g, sym, **k: impact)
+                 code_impact=_capt_impact)
     out = box.data_to_code("foudre")
     assert "writer" in out.lower() or "écrivain" in out.lower() or "Writer" in out
     assert "recup_blitzortung.php" in out
     assert "CallerX" in out  # appelant impacté
+    # Régression : code_impact doit recevoir le path REPO-RELATIF (resolve_file matche par
+    # endswith) et JAMAIS « repo/path » (sinon 0 racine, impact faussé à zéro).
+    assert "cron/recup_blitzortung.php" in seen_syms
+    assert not any(s.startswith("site-infoclimat/") for s in seen_syms)
 
 
 def test_data_to_code_graph_unavailable_still_lists_refs(tmp_path, monkeypatch):

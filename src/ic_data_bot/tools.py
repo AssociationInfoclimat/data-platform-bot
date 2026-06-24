@@ -1280,7 +1280,10 @@ class ToolBox:
                     lines.append(f"- {fp} _(hors graphe)_")
                     continue
                 try:
-                    imp = graph_mod.code_impact(g, fp, direction="callers", depth=1,
+                    # code_impact résout un chemin via resolve_file (endswith sur le path
+                    # REPO-RELATIF) : passer `path`, pas `fp` (préfixé du repo → 0 racine).
+                    # Collision de chemin entre repos rare ici (la ref registre est ciblée).
+                    imp = graph_mod.code_impact(g, path, direction="callers", depth=1,
                                                 sidecar=sidecar)
                 except Exception as exc:  # noqa: BLE001
                     lines.append(f"- {fp} _(impact KO : {type(exc).__name__})_")
