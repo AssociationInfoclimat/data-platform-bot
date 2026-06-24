@@ -202,7 +202,11 @@ if _ci_on("CODE_INDEX_ENABLED") and _ci_on("CODE_INDEX_PUBLIC"):
         """Recherche HYBRIDE (sémantique + lexicale BM25, fusionnées) dans le code source des
         repos Infoclimat, sur des chunks contextualisés et avec réécriture automatique de la
         requête. Pour « où/comment est implémenté X » ; renvoie repo/chemin:lignes. Filtres
-        optionnels : status (actif/douteux/mort), source (github/gitlab/other), since (YYYY-MM-DD)."""
+        optionnels : status (actif/douteux/mort), source (github/gitlab/other), since (YYYY-MM-DD).
+        ENCHAÎNER ENSUITE — un extrait est un POINT D'ENTRÉE, pas une réponse : confirmer via
+        `read_file`, mesurer l'impact d'un symbole via `code_impact` (pas une nouvelle recherche),
+        relier table↔code via `data_to_code`. NE PAS reformuler la même recherche en boucle :
+        lire d'abord les extraits déjà obtenus."""
         return _traced("search_code", {"query": query, "repo": repo, "status": status,
                                         "source": source, "since": since},
                        lambda: _safe(_tb.search_code, query, repo or None, k,

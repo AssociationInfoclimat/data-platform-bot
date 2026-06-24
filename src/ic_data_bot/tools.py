@@ -308,7 +308,14 @@ SCHEMAS = [
             "pertinents avec repo/chemin:lignes. Chaque extrait est annoté de sa source "
             "(github=moderne, gitlab=souvent legacy), de son âge et de son statut gouvernance "
             "(actif/douteux/mort) : PRIVILÉGIER le code actif/récent et SIGNALER explicitement "
-            "si la réponse repose sur du code legacy/mort."
+            "si la réponse repose sur du code legacy/mort. "
+            "ENCHAÎNER ENSUITE — un extrait n'est qu'un POINT D'ENTRÉE, pas une réponse : "
+            "(1) confirmer en lisant le fichier complet via `read_file` ; "
+            "(2) pour « qu'est-ce qui casse si je change ce symbole », mesurer le rayon "
+            "d'impact via `code_impact` (NE PAS relancer search_code pour trouver les "
+            "appelants) ; (3) pour relier la donnée au code (« quel code écrit/lit cette "
+            "table »), passer par `data_to_code`. NE PAS reformuler la même recherche en "
+            "boucle avec des synonymes : lire d'abord les extraits déjà obtenus."
         ),
         "input_schema": {
             "type": "object",
