@@ -351,3 +351,27 @@ def test_dispatch_search_code_reads_filters(tmp_path, monkeypatch):
     box = ToolBox(tmp_path, public=False)
     box.dispatch("search_code", {"query": "x", "status": "actif", "since": "2026-01-01"})
     assert captured["status"] == "actif" and captured["since"] == "2026-01-01"
+
+
+def test_graph_tools_skip_llm_scrubber(tmp_path, monkeypatch):
+    """Régression : les 3 outils structurés (data_to_code/code_path/dead_code) ne passent
+    JAMAIS par le scrubber LLM — celui-ci hallucine du contenu de fichier quand la sortie
+    est menée par un chemin. Seul le regex redact_secrets s'applique."""
+    box = ToolBox(_registry_snapshot(tmp_path), public=False)
+    calls = []
+    box.secret_scrub = lambda s: calls.append(s) or "SCRUBBED-LLM"
+    impact = {"roots": [_node("seed")], "impacted": [], "scope": "file", "files": [],
+              "ambiguous": False, "truncated": False, "by_subsystem": {}, "tiers": {}}
+    _patch_graph(
+        box, monkeypatch,
+        resolve_file=lambda g, p: ["seed"],
+        code_impact=lambda g, sym, **k: impact,
+        shortest_path=lambda g, s, t, **k: {
+            "found": True, "path": [_node("a"), _node("b")], "min_confidence": 0.8,
+            "src_roots": ["a"], "dst_roots": ["b"], "direction": "src->dst"},
+        dead_symbols=lambda g, **k: {
+            "count": 1, "truncated": False, "symbols": [_node("d")], "caveat": "x"},
+    )
+    for out in (box.data_to_code("foudre"), box.code_path("a", "b"), box.dead_code()):
+        assert "SCRUBBED-LLM" not in out
+    assert calls == []  # scrubber LLM jamais invoqué par ces outils

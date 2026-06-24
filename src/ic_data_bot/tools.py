@@ -1311,10 +1311,11 @@ class ToolBox:
             else:
                 continue
             break  # plafond global de fichiers atteint
-        out = redact_secrets("\n".join(lines))
-        if self.secret_scrub:
-            out = self.secret_scrub(out)
-        return out
+        # PAS de scrubber LLM ici (ni dans code_path/dead_code) : la sortie est 100 %
+        # métadonnées (chemins, symboles, URLs), jamais de code brut à secrets. Le regex
+        # redact_secrets suffit ; le scrubber LLM, lui, HALLUCINE le contenu d'un fichier
+        # quand la sortie est menée par un chemin (réservé à search_code/search_docs).
+        return redact_secrets("\n".join(lines))
 
     def code_path(self, source: str, target: str, max_depth: int = 8) -> str:
         """Plus court chemin d'appel entre deux symboles dans le graphe de code (A → B → C),
@@ -1369,10 +1370,8 @@ class ToolBox:
             conf = n.get("confidence")
             tag = "" if i == 0 else (f" _arête {conf:.2f}_" if isinstance(conf, (int, float)) else "")
             lines.append(f"{i + 1}. {n['qname']} ({n.get('kind', '?')}) — {link}{tag}")
-        out = redact_secrets("\n".join(lines))
-        if self.secret_scrub:
-            out = self.secret_scrub(out)
-        return out
+        # Sortie métadonnées seule → regex suffit, pas de scrubber LLM (cf. data_to_code).
+        return redact_secrets("\n".join(lines))
 
     def dead_code(self, repo: str | None = None, subsystem: str | None = None,
                   top: int = 30) -> str:
@@ -1407,10 +1406,8 @@ class ToolBox:
             lines.append(f"• {n['qname']} ({n.get('kind', '?')}) — {link}")
         if res.get("truncated"):
             lines.append(f"… (liste tronquée à {top} ; affine avec repo/subsystem ou top plus haut)")
-        out = redact_secrets("\n".join(lines))
-        if self.secret_scrub:
-            out = self.secret_scrub(out)
-        return out
+        # Sortie métadonnées seule → regex suffit, pas de scrubber LLM (cf. data_to_code).
+        return redact_secrets("\n".join(lines))
 
     def meteofrance_catalog(self, api: str = "", topic: str = "contract", probe: bool = False,
                             since: str = "") -> str:
