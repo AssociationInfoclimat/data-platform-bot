@@ -1079,10 +1079,9 @@ class ToolBox:
                 lines.append(f"{'•' * n['depth']} {n['qname']} ({n['kind']}) — {link}{tag}")
             if res["truncated"]:
                 lines.append("… (liste tronquée — affiner avec un symbole plus précis ou depth=1)")
-        out = redact_secrets("\n".join(lines))
-        if self.secret_scrub:
-            out = self.secret_scrub(out)
-        return out
+        # Sortie métadonnées seule (symboles/chemins/URLs) → regex suffit, pas de scrubber LLM
+        # (qui HALLUCINE le contenu d'un fichier en mode fichier ; réservé à search_code/search_docs).
+        return redact_secrets("\n".join(lines))
 
     def code_hotspots(self, top: int = 15, repo: str | None = None,
                       subsystem: str | None = None, by: str = "centrality") -> str:
@@ -1114,10 +1113,8 @@ class ToolBox:
             m = n["metric"]
             mstr = f"{m:.4f}" if isinstance(m, float) else f"{m} appelants"
             lines.append(f"• {n['qname']} ({n['kind']}) — {mstr} — {link}")
-        out = redact_secrets("\n".join(lines))
-        if self.secret_scrub:
-            out = self.secret_scrub(out)
-        return out
+        # Sortie métadonnées seule → regex suffit, pas de scrubber LLM (cf. code_impact).
+        return redact_secrets("\n".join(lines))
 
     @staticmethod
     def _split_ref(ref: str) -> tuple[str, str] | None:

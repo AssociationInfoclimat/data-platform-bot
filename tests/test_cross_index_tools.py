@@ -354,9 +354,10 @@ def test_dispatch_search_code_reads_filters(tmp_path, monkeypatch):
 
 
 def test_graph_tools_skip_llm_scrubber(tmp_path, monkeypatch):
-    """Régression : les 3 outils structurés (data_to_code/code_path/dead_code) ne passent
-    JAMAIS par le scrubber LLM — celui-ci hallucine du contenu de fichier quand la sortie
-    est menée par un chemin. Seul le regex redact_secrets s'applique."""
+    """Régression : TOUS les outils de code à sortie métadonnées (data_to_code, code_path,
+    dead_code, code_impact, code_hotspots) ne passent JAMAIS par le scrubber LLM — celui-ci
+    hallucine du contenu de fichier quand la sortie est menée par un chemin. Seul le regex
+    redact_secrets s'applique. (search_code/search_docs, eux, GARDENT le scrubber : code brut.)"""
     box = ToolBox(_registry_snapshot(tmp_path), public=False)
     calls = []
     box.secret_scrub = lambda s: calls.append(s) or "SCRUBBED-LLM"
@@ -366,12 +367,26 @@ def test_graph_tools_skip_llm_scrubber(tmp_path, monkeypatch):
         box, monkeypatch,
         resolve_file=lambda g, p: ["seed"],
         code_impact=lambda g, sym, **k: impact,
+        code_hotspots=lambda g, **k: {"hotspots": [_node("hub", metric=0.9)], "by": "centrality"},
         shortest_path=lambda g, s, t, **k: {
             "found": True, "path": [_node("a"), _node("b")], "min_confidence": 0.8,
             "src_roots": ["a"], "dst_roots": ["b"], "direction": "src->dst"},
         dead_symbols=lambda g, **k: {
             "count": 1, "truncated": False, "symbols": [_node("d")], "caveat": "x"},
     )
-    for out in (box.data_to_code("foudre"), box.code_path("a", "b"), box.dead_code()):
+    for out in (box.data_to_code("foudre"), box.code_path("a", "b"), box.dead_code(),
+                box.code_impact("seed"), box.code_hotspots()):
         assert "SCRUBBED-LLM" not in out
     assert calls == []  # scrubber LLM jamais invoqué par ces outils
+
+
+def test_search_tools_still_use_llm_scrubber(monkeypatch):
+    """Garde-fou inverse : search_code/search_docs DOIVENT garder le scrubber LLM (ils
+    renvoient du code source brut avec des secrets en dur). On le vérifie au niveau source."""
+    import inspect
+    from ic_data_bot.tools import ToolBox
+    for meth in (ToolBox.search_code, ToolBox.search_docs):
+        assert "self.secret_scrub" in inspect.getsource(meth)
+    for meth in (ToolBox.code_impact, ToolBox.code_hotspots, ToolBox.code_path,
+                 ToolBox.dead_code, ToolBox.data_to_code):
+        assert "self.secret_scrub" not in inspect.getsource(meth)
