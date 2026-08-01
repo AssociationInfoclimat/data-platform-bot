@@ -62,7 +62,8 @@ def test_schemas_shape():
     names = {t["name"] for t in SCHEMAS}
     assert names == {"read_file", "grep", "lineage", "kestra_recent", "volumetrie",
                      "schema", "search_code", "search_docs", "code_impact",
-                     "code_hotspots", "meteofrance_catalog"}
+                     "code_hotspots", "meteofrance_catalog",
+                     "data_to_code", "code_path", "dead_code"}
 
 
 def test_search_code_disabled_by_default(tmp_path, monkeypatch):

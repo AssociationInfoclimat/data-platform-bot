@@ -308,7 +308,14 @@ SCHEMAS = [
             "pertinents avec repo/chemin:lignes. Chaque extrait est annoté de sa source "
             "(github=moderne, gitlab=souvent legacy), de son âge et de son statut gouvernance "
             "(actif/douteux/mort) : PRIVILÉGIER le code actif/récent et SIGNALER explicitement "
-            "si la réponse repose sur du code legacy/mort."
+            "si la réponse repose sur du code legacy/mort. "
+            "ENCHAÎNER ENSUITE — un extrait n'est qu'un POINT D'ENTRÉE, pas une réponse : "
+            "(1) confirmer en lisant le fichier complet via `read_file` ; "
+            "(2) pour « qu'est-ce qui casse si je change ce symbole », mesurer le rayon "
+            "d'impact via `code_impact` (NE PAS relancer search_code pour trouver les "
+            "appelants) ; (3) pour relier la donnée au code (« quel code écrit/lit cette "
+            "table »), passer par `data_to_code`. NE PAS reformuler la même recherche en "
+            "boucle avec des synonymes : lire d'abord les extraits déjà obtenus."
         ),
         "input_schema": {
             "type": "object",
@@ -316,6 +323,14 @@ SCHEMAS = [
                 "query": {"type": "string", "description": "Question en langage naturel sur le code"},
                 "repo": {"type": "string", "description": "Limiter à un repo (ex. site-infoclimat) — optionnel"},
                 "k": {"type": "integer", "description": "Nombre d'extraits à renvoyer (défaut 6)"},
+                "status": {"type": "string",
+                           "description": "Filtrer par statut gouvernance : actif | douteux | mort. "
+                                          "Ex. 'actif' pour ignorer le code legacy/mort — optionnel"},
+                "source": {"type": "string",
+                           "description": "Filtrer par origine : github (moderne) | gitlab (souvent legacy) "
+                                          "| other — optionnel"},
+                "since": {"type": "string",
+                          "description": "Borne basse YYYY-MM-DD sur le dernier commit (code récent ≥ date) — optionnel"},
             },
             "required": ["query"],
         },
@@ -336,6 +351,12 @@ SCHEMAS = [
             "properties": {
                 "query": {"type": "string", "description": "Question en langage naturel sur la gouvernance data"},
                 "k": {"type": "integer", "description": "Nombre d'entrées à renvoyer (défaut 8)"},
+                "status": {"type": "string",
+                           "description": "Filtrer par statut gouvernance : actif | douteux | mort — optionnel"},
+                "source": {"type": "string",
+                           "description": "Filtrer par origine : github | gitlab | other — optionnel"},
+                "since": {"type": "string",
+                          "description": "Borne basse YYYY-MM-DD sur le dernier commit — optionnel"},
             },
             "required": ["query"],
         },
@@ -386,6 +407,74 @@ SCHEMAS = [
                 "subsystem": {"type": "string", "description": "Limiter à un sous-système 'repo/dossier' (ex. 'site-infoclimat/api') — optionnel"},
                 "by": {"type": "string", "enum": ["centrality", "fan_in"],
                        "description": "centrality = importance PageRank (défaut) ; fan_in = nb d'appelants"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "data_to_code",
+        "description": (
+            "PONT registre DATA → CODE : pour une table/pipeline/dataset, liste les FICHIERS "
+            "de code qui la touchent (writers/readers de inventory/tables.yaml, script + "
+            "déclencheur des pipelines, sourceRepo/retroCompatLayer des contrats ODCS) PUIS, "
+            "via le graphe d'appels, le RAYON D'IMPACT de chacun (top appelants directs). "
+            "Croise `lineage` (le QUI lit/écrit la donnée) et `code_impact` (le QUOI casse si "
+            "on touche ce fichier). Pour « quel code touche la table X et qu'est-ce que ça "
+            "impacte », « si je migre cette table, quels fichiers et quels appelants ». "
+            "Préfère-le à `lineage` seul quand tu veux DESCENDRE de la donnée vers le code et "
+            "son blast radius. Donne un nom (ou fragment) de table/pipeline/dataset. Les "
+            "fichiers hors graphe sont marqués « (hors graphe) » ; si le graphe n'est pas "
+            "déployé, la liste registre est renvoyée sans l'impact."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string",
+                         "description": "Nom (ou fragment) de table, pipeline, dataset — ex. 'foudre', 'Infrahoraire'"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "code_path",
+        "description": (
+            "PLUS COURT CHEMIN d'appel entre DEUX symboles dans le graphe de code : « comment "
+            "A atteint-il B », « par quelle chaîne d'appels ce contrôleur arrive-t-il à cette "
+            "fonction de bas niveau ». Renvoie la chaîne A → B → C avec la confiance de chaque "
+            "saut et repo/chemin:lignes + URL. Complément de `code_impact` (qui, lui, donne le "
+            "rayon d'impact d'UN symbole) : ici on RELIE deux symboles connus. Donne les noms "
+            "EXACTS (fonction/classe/méthode, ou 'Classe.methode'). Si aucun chemin dans le "
+            "sens demandé, l'outil tente le sens inverse et le SIGNALE. Résolution STATIQUE "
+            "(appels dynamiques non vus) : une absence de chemin n'est pas une preuve de "
+            "non-dépendance — essayer une profondeur plus haute."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "description": "Symbole de départ (nom exact)"},
+                "target": {"type": "string", "description": "Symbole d'arrivée (nom exact)"},
+                "max_depth": {"type": "integer", "description": "Profondeur maximale de recherche (défaut 8)"},
+            },
+            "required": ["source", "target"],
+        },
+    },
+    {
+        "name": "dead_code",
+        "description": (
+            "CODE POTENTIELLEMENT MORT : symboles à fan-in nul (fonctions/méthodes jamais "
+            "appelées dans le graphe d'appels), filtrable par repo ou sous-système. Pour "
+            "« quel code n'est plus appelé », « candidats à la suppression ». CAVEAT (rendu en "
+            "tête) : les points d'entrée (routes, mains de cron, hooks, callbacks de framework) "
+            "ont LÉGITIMEMENT 0 appelant sous résolution statique — ne jamais supprimer à "
+            "l'aveugle ; croiser avec `lineage`/`search_code` avant de conclure. Renvoie "
+            "repo/chemin:lignes + URL."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Limiter à un repo (ex. site-infoclimat) — optionnel"},
+                "subsystem": {"type": "string", "description": "Limiter à un sous-système 'repo/dossier' (ex. 'site-infoclimat/api') — optionnel"},
+                "top": {"type": "integer", "description": "Nombre de symboles à renvoyer (défaut 30)"},
             },
             "required": [],
         },
@@ -741,7 +830,9 @@ class ToolBox:
             return f"Aucun DDL pour « {name} » dans {', '.join(SCHEMA_FILES)} (vérifie le nom exact)."
         return "\n\n".join(blocks)[: MAX_SCHEMA_CHARS * 2]
 
-    def search_code(self, query: str, repo: str | None = None, k: int = 6) -> str:
+    def search_code(self, query: str, repo: str | None = None, k: int = 6,
+                    status: str | None = None, source: str | None = None,
+                    since: str | None = None) -> str:
         """Recherche hybride (sémantique + BM25) dans le code source, sur chunks
         contextualisés et avec réécriture de requête (index code_index de data-platform/tools,
         réutilisé via search_code()). Le code applicatif vient de repos PRIVÉS : refusé en
@@ -776,7 +867,10 @@ class ToolBox:
         try:
             k = max(1, min(int(k or 6), 20))
             mistral_throttle()  # l'embedding codestral-embed de la requête tape le quota Mistral
-            results = _search(query, k=k, repos=[repo] if repo else None)
+            # Filtres GOUVERNANCE optionnels (avant rerank) passés tels quels à code_index :
+            # status (actif/douteux/mort), source (github/gitlab/other), since (commit ≥ date).
+            results = _search(query, k=k, repos=[repo] if repo else None,
+                              status=status or None, source=source or None, since=since or None)
         except Exception as exc:  # noqa: BLE001 — surface l'erreur à l'agent
             raise ToolError(f"Recherche de code impossible : {type(exc).__name__}: {exc}")
         if not results:
@@ -800,7 +894,8 @@ class ToolBox:
             out = self.secret_scrub(out)
         return out
 
-    def search_docs(self, query: str, k: int = 8) -> str:
+    def search_docs(self, query: str, k: int = 8, status: str | None = None,
+                    source: str | None = None, since: str | None = None) -> str:
         """Recherche SÉMANTIQUE dans la gouvernance data-platform (contrats ODCS, inventory,
         catalog, glossaire, audits) — table `docs_chunks` (mistral-embed), via
         `code_index.search_docs()`. Complément des outils lexicaux grep/lineage : ici on
@@ -828,7 +923,9 @@ class ToolBox:
             # vit dans le retrieval → on privilégie le rappel (chunks docs petits, peu de bruit).
             k = max(1, min(int(k or 8), 20))
             mistral_throttle()  # l'embedding mistral-embed de la requête tape le quota Mistral
-            results = _search(query, k=k)
+            # Mêmes filtres gouvernance optionnels que search_code (cf. ci-dessus).
+            results = _search(query, k=k, status=status or None, source=source or None,
+                              since=since or None)
         except Exception as exc:  # noqa: BLE001 — surface l'erreur à l'agent
             raise ToolError(f"Recherche docs impossible : {type(exc).__name__}: {exc}")
         if not results:
@@ -982,10 +1079,9 @@ class ToolBox:
                 lines.append(f"{'•' * n['depth']} {n['qname']} ({n['kind']}) — {link}{tag}")
             if res["truncated"]:
                 lines.append("… (liste tronquée — affiner avec un symbole plus précis ou depth=1)")
-        out = redact_secrets("\n".join(lines))
-        if self.secret_scrub:
-            out = self.secret_scrub(out)
-        return out
+        # Sortie métadonnées seule (symboles/chemins/URLs) → regex suffit, pas de scrubber LLM
+        # (qui HALLUCINE le contenu d'un fichier en mode fichier ; réservé à search_code/search_docs).
+        return redact_secrets("\n".join(lines))
 
     def code_hotspots(self, top: int = 15, repo: str | None = None,
                       subsystem: str | None = None, by: str = "centrality") -> str:
@@ -1017,10 +1113,298 @@ class ToolBox:
             m = n["metric"]
             mstr = f"{m:.4f}" if isinstance(m, float) else f"{m} appelants"
             lines.append(f"• {n['qname']} ({n['kind']}) — {mstr} — {link}")
-        out = redact_secrets("\n".join(lines))
-        if self.secret_scrub:
-            out = self.secret_scrub(out)
-        return out
+        # Sortie métadonnées seule → regex suffit, pas de scrubber LLM (cf. code_impact).
+        return redact_secrets("\n".join(lines))
+
+    @staticmethod
+    def _split_ref(ref: str) -> tuple[str, str] | None:
+        """« repo:chemin[:ligne] » → (repo, chemin) ; la ligne éventuelle est strippée.
+        None si la forme n'est pas un couple repo:chemin (on ne devine pas)."""
+        s = str(ref or "").strip().strip("'\"")
+        if ":" not in s:
+            return None
+        repo, _, rest = s.partition(":")
+        repo = repo.strip()
+        # rest peut porter un suffixe :ligne (trigger.source) → on garde le chemin seul.
+        path = rest.split(":", 1)[0].strip()
+        if not repo or not path:
+            return None
+        return repo, path
+
+    def _registry_code_refs(self, name: str) -> list[tuple]:
+        """Références CODE structurées (role, repo, path, raw) extraites des registres qui
+        mentionnent `name`, avec la MÊME normalisation que lineage() (lower + tiret↔underscore,
+        exclusion _ops/ en mode public). Sources :
+          - inventory/tables.yaml : writers[]/readers[] (« repo:path ») des tables matchées ;
+          - inventory/pipelines.yaml : repo+script et trigger.source des pipelines dont
+            inputs/outputs réfèrent le nom ;
+          - contracts/*.odcs.yaml : customProperties sourceRepo/retroCompatLayer."""
+        import yaml
+
+        needle = name.strip().lower().replace("-", "_")
+        if not needle:
+            raise ToolError("Nom vide.")
+
+        def _match(text: str) -> bool:
+            return needle in str(text).lower().replace("-", "_")
+
+        refs: list[tuple] = []
+        seen: set[tuple] = set()
+
+        def _add(role: str, raw: str) -> None:
+            sp = self._split_ref(raw)
+            if not sp:
+                return
+            repo, path = sp
+            key = (role, repo, path)
+            if key in seen:
+                return
+            seen.add(key)
+            refs.append((role, repo, path, str(raw).strip()))
+
+        # ── inventory/tables.yaml : writers/readers des tables au nom matché ──
+        tpath = self.root / "inventory/tables.yaml"
+        if tpath.is_file():
+            try:
+                doc = yaml.safe_load(tpath.read_text(encoding="utf-8", errors="replace"))
+            except yaml.YAMLError:
+                doc = None
+            for tbl in (doc.get("tables") if isinstance(doc, dict) else []) or []:
+                if not isinstance(tbl, dict) or not _match(tbl.get("name", "")):
+                    continue
+                for w in tbl.get("writers") or []:
+                    _add("writer", w)
+                for r in tbl.get("readers") or []:
+                    _add("reader", r)
+
+        # ── inventory/pipelines.yaml : pipelines dont inputs/outputs réfèrent le nom ──
+        ppath = self.root / "inventory/pipelines.yaml"
+        if ppath.is_file():
+            try:
+                doc = yaml.safe_load(ppath.read_text(encoding="utf-8", errors="replace"))
+            except yaml.YAMLError:
+                doc = None
+            for pl in (doc.get("pipelines") if isinstance(doc, dict) else []) or []:
+                if not isinstance(pl, dict):
+                    continue
+                io = (pl.get("inputs") or []) + (pl.get("outputs") or [])
+                if not (any(_match(x) for x in io) or _match(pl.get("id", ""))):
+                    continue
+                repo, script = pl.get("repo"), pl.get("script")
+                if repo and script:
+                    _add("pipeline", f"{repo}:{script}")
+                trig = pl.get("trigger")
+                if isinstance(trig, dict) and trig.get("source"):
+                    _add("source", trig["source"])
+
+        # ── contracts/*.odcs.yaml : sourceRepo / retroCompatLayer ──
+        cdir = self.root / "contracts"
+        if cdir.is_dir():
+            for fp in sorted(cdir.glob("*.odcs.yaml")):
+                if fp.name.startswith("_"):
+                    continue
+                raw = fp.read_text(encoding="utf-8", errors="replace")
+                if not _match(raw):
+                    continue
+                try:
+                    cdoc = yaml.safe_load(raw)
+                except yaml.YAMLError:
+                    continue
+                for cp in (cdoc.get("customProperties") if isinstance(cdoc, dict) else []) or []:
+                    if not isinstance(cp, dict):
+                        continue
+                    prop, val = cp.get("property"), cp.get("value")
+                    if prop == "sourceRepo":
+                        _add("source", val)
+                    elif prop == "retroCompatLayer":
+                        _add("retrocompat", val)
+        return refs
+
+    # data_to_code : nb de fichiers code distincts enrichis, et appelants par fichier (bornes)
+    MAX_DATA_TO_CODE_FILES = 12
+    MAX_DATA_TO_CODE_CALLERS = 4
+
+    def data_to_code(self, name: str) -> str:
+        """Pont registre DATA → code : pour une table/pipeline/dataset, liste les fichiers code
+        (writers/readers/pipelines/source/rétrocompat) puis, via le graphe d'appels, leur RAYON
+        D'IMPACT (top appelants par fichier). Croise `lineage` (DATA) et `code_impact` (code).
+        Refusé en mode public sans opt-in CODE_INDEX_PUBLIC (code des repos privés)."""
+        if self.public and os.environ.get("CODE_INDEX_PUBLIC", "").lower() not in ("1", "true", "yes"):
+            raise ToolError("Pont data→code désactivé en mode public (code des repos privés "
+                            "non exposé).")
+        refs = self._registry_code_refs(name)
+        if not refs:
+            raise ToolError(
+                f"Aucune référence code à « {name} » dans les registres "
+                "(inventory/tables.yaml writers/readers, pipelines, contrats sourceRepo/"
+                "retroCompatLayer). Essaie `lineage` pour les dépendances DATA, ou vérifie "
+                "l'orthographe."
+            )
+        # Charge le graphe une fois ; dégradation gracieuse si non déployé.
+        graph_mod = g = sidecar = None
+        graph_err = ""
+        try:
+            graph_mod, g, sidecar = self._load_graph()
+        except ToolError as exc:
+            graph_err = str(exc)
+
+        # Groupe les refs par rôle (ordre de présentation stable).
+        role_lbl = {"writer": "Writers (écrivent)", "reader": "Readers (lisent)",
+                    "pipeline": "Pipelines", "source": "Sources / déclencheurs",
+                    "retrocompat": "Couches de rétro-compatibilité"}
+        by_role: dict[str, list[tuple]] = {}
+        for r in refs:
+            by_role.setdefault(r[0], []).append(r)
+
+        lines = [f"**{name}** — code croisé aux registres data ({len(refs)} référence(s)) :"]
+        if graph_err:
+            lines.append(f"_⚠ rayon d'impact indisponible ({graph_err}) — refs registre seules._")
+
+        shown_files = 0
+        for role in ("writer", "reader", "pipeline", "source", "retrocompat"):
+            items = by_role.get(role)
+            if not items:
+                continue
+            lines.append(f"\n### {role_lbl[role]}")
+            for _role, repo, path, raw in items:
+                fp = f"{repo}/{path}"
+                if graph_mod is None or g is None:
+                    # graphe absent : on liste la ref, impact indisponible
+                    lines.append(f"- {fp}")
+                    continue
+                if shown_files >= self.MAX_DATA_TO_CODE_FILES:
+                    lines.append("- … (autres références — affiner avec `lineage`/`code_impact`)")
+                    break
+                shown_files += 1
+                try:
+                    in_graph = bool(graph_mod.resolve_file(g, path))
+                except Exception:  # noqa: BLE001
+                    in_graph = False
+                if not in_graph:
+                    lines.append(f"- {fp} _(hors graphe)_")
+                    continue
+                try:
+                    # code_impact résout un chemin via resolve_file (endswith sur le path
+                    # REPO-RELATIF) : passer `path`, pas `fp` (préfixé du repo → 0 racine).
+                    # Collision de chemin entre repos rare ici (la ref registre est ciblée).
+                    imp = graph_mod.code_impact(g, path, direction="callers", depth=1,
+                                                sidecar=sidecar)
+                except Exception as exc:  # noqa: BLE001
+                    lines.append(f"- {fp} _(impact KO : {type(exc).__name__})_")
+                    continue
+                # URL du fichier = 1er source_url d'un symbole défini dans ce fichier (jamais
+                # reconstruit), comme dans code_impact (mode fichier).
+                url = next((r["source_url"] for r in imp.get("roots", [])
+                            if r.get("source_url")), "")
+                loc = f"[{fp}]({url})" if url else fp
+                callers = imp.get("impacted", [])
+                lines.append(f"- {loc} — {len(callers)} appelant(s) directs")
+                for c in callers[: self.MAX_DATA_TO_CODE_CALLERS]:
+                    cl = f"{c['repo']}/{c['path']}:{c['start_line']}"
+                    clink = f"[{cl}]({c['source_url']})" if c.get("source_url") else cl
+                    lines.append(f"  • {c['qname']} ({c.get('kind', '?')}) — {clink}")
+                if len(callers) > self.MAX_DATA_TO_CODE_CALLERS:
+                    lines.append(f"  • … +{len(callers) - self.MAX_DATA_TO_CODE_CALLERS} autres")
+            else:
+                continue
+            break  # plafond global de fichiers atteint
+        # PAS de scrubber LLM ici (ni dans code_path/dead_code) : la sortie est 100 %
+        # métadonnées (chemins, symboles, URLs), jamais de code brut à secrets. Le regex
+        # redact_secrets suffit ; le scrubber LLM, lui, HALLUCINE le contenu d'un fichier
+        # quand la sortie est menée par un chemin (réservé à search_code/search_docs).
+        return redact_secrets("\n".join(lines))
+
+    def code_path(self, source: str, target: str, max_depth: int = 8) -> str:
+        """Plus court chemin d'appel entre deux symboles dans le graphe de code (A → B → C),
+        avec la confiance de chaque saut. Si aucun chemin source→target, on tente l'inverse
+        et on le signale. Pur AST ; refusé en mode public sans CODE_INDEX_PUBLIC."""
+        if self.public and os.environ.get("CODE_INDEX_PUBLIC", "").lower() not in ("1", "true", "yes"):
+            raise ToolError("Graphe de code désactivé en mode public (structure du code des "
+                            "repos privés non exposée).")
+        source, target = (source or "").strip(), (target or "").strip()
+        if not source or not target:
+            raise ToolError("Donner deux symboles (source ET cible).")
+        try:
+            max_depth = max(1, min(int(max_depth or 8), 20))
+        except (TypeError, ValueError):
+            max_depth = 8
+        graph_mod, g, sidecar = self._load_graph()
+        try:
+            res = graph_mod.shortest_path(g, source, target, max_depth=max_depth, sidecar=sidecar)
+        except Exception as exc:  # noqa: BLE001
+            raise ToolError(f"Recherche de chemin impossible : {type(exc).__name__}: {exc}")
+        src_roots, dst_roots = res.get("src_roots") or [], res.get("dst_roots") or []
+        if not src_roots:
+            return (f"« {source} » introuvable dans le graphe d'appels (donner le nom EXACT "
+                    "d'une fonction/classe/méthode ; PHP/Python/TS/JS seulement).")
+        if not dst_roots:
+            return (f"« {target} » introuvable dans le graphe d'appels (donner le nom EXACT "
+                    "d'une fonction/classe/méthode ; PHP/Python/TS/JS seulement).")
+        if not res.get("found"):
+            note = ""
+            if len(src_roots) > 1 or len(dst_roots) > 1:
+                note = (f" ({len(src_roots)} définition(s) de « {source} », "
+                        f"{len(dst_roots)} de « {target} »)")
+            return (f"Aucun chemin d'appel « {source} » → « {target} » sous profondeur "
+                    f"{max_depth}{note}. La résolution est STATIQUE (appels dynamiques/"
+                    "indirects non vus) : essaie une profondeur plus haute, ou les deux "
+                    "symboles peuvent ne pas être reliés.")
+        path = res.get("path") or []
+        direction = res.get("direction")
+        lines = [f"**Chemin d'appel** « {source} » → « {target} » — {len(path)} nœud(s), "
+                 f"confiance min {res.get('min_confidence', 0):.2f} :"]
+        if direction == "dst->src":
+            lines.append("_⚠ aucun chemin dans le sens demandé ; trouvé en SENS INVERSE "
+                         "(target→source), présenté ici tel quel._")
+        if len(src_roots) > 1 or len(dst_roots) > 1:
+            lines.append(f"_⚠ racines multiples : {len(src_roots)} pour « {source} », "
+                         f"{len(dst_roots)} pour « {target} » (un chemin parmi d'autres)._")
+        chain = " → ".join(n["qname"] for n in path)
+        lines.append(chain)
+        for i, n in enumerate(path):
+            loc = f"{n['repo']}/{n['path']}:{n['start_line']}"
+            link = f"[{loc}]({n['source_url']})" if n.get("source_url") else loc
+            conf = n.get("confidence")
+            tag = "" if i == 0 else (f" _arête {conf:.2f}_" if isinstance(conf, (int, float)) else "")
+            lines.append(f"{i + 1}. {n['qname']} ({n.get('kind', '?')}) — {link}{tag}")
+        # Sortie métadonnées seule → regex suffit, pas de scrubber LLM (cf. data_to_code).
+        return redact_secrets("\n".join(lines))
+
+    def dead_code(self, repo: str | None = None, subsystem: str | None = None,
+                  top: int = 30) -> str:
+        """Code potentiellement MORT : symboles à fan-in nul (jamais appelés) du graphe. Le
+        `caveat` (points d'entrée légitimes) est rendu EN TÊTE. Pur AST ; refusé en mode public
+        sans CODE_INDEX_PUBLIC."""
+        if self.public and os.environ.get("CODE_INDEX_PUBLIC", "").lower() not in ("1", "true", "yes"):
+            raise ToolError("Graphe de code désactivé en mode public (structure du code des "
+                            "repos privés non exposée).")
+        try:
+            top = max(1, min(int(top or 30), 100))
+        except (TypeError, ValueError):
+            top = 30
+        graph_mod, g, sidecar = self._load_graph()
+        try:
+            res = graph_mod.dead_symbols(g, repo=repo or None, subsystem=subsystem or None,
+                                         top=top, sidecar=sidecar)
+        except Exception as exc:  # noqa: BLE001
+            raise ToolError(f"Détection du code mort impossible : {type(exc).__name__}: {exc}")
+        symbols = res.get("symbols") or []
+        scope = (f" — repo {repo}" if repo else "") + (f" — {subsystem}" if subsystem else "")
+        lines = [f"⚠ {res.get('caveat', '')}", ""]  # caveat d'abord
+        if not symbols:
+            lines.append(f"Aucun symbole à fan-in nul{scope} (filtre trop restrictif, "
+                         "ou graphe non déployé).")
+            return "\n".join(lines)
+        lines.append(f"**Code potentiellement mort** (fan-in nul{scope}) — {len(symbols)} "
+                     "symbole(s) :")
+        for n in symbols:
+            loc = f"{n['repo']}/{n['path']}:{n['start_line']}"
+            link = f"[{loc}]({n['source_url']})" if n.get("source_url") else loc
+            lines.append(f"• {n['qname']} ({n.get('kind', '?')}) — {link}")
+        if res.get("truncated"):
+            lines.append(f"… (liste tronquée à {top} ; affine avec repo/subsystem ou top plus haut)")
+        # Sortie métadonnées seule → regex suffit, pas de scrubber LLM (cf. data_to_code).
+        return redact_secrets("\n".join(lines))
 
     def meteofrance_catalog(self, api: str = "", topic: str = "contract", probe: bool = False,
                             since: str = "") -> str:
@@ -1074,9 +1458,24 @@ class ToolBox:
             return self.schema(tool_input["name"])
         if name == "search_code":
             return self.search_code(tool_input["query"], tool_input.get("repo") or None,
-                                    int(tool_input.get("k") or 6))
+                                    int(tool_input.get("k") or 6),
+                                    tool_input.get("status") or None,
+                                    tool_input.get("source") or None,
+                                    tool_input.get("since") or None)
         if name == "search_docs":
-            return self.search_docs(tool_input["query"], int(tool_input.get("k") or 8))
+            return self.search_docs(tool_input["query"], int(tool_input.get("k") or 8),
+                                    tool_input.get("status") or None,
+                                    tool_input.get("source") or None,
+                                    tool_input.get("since") or None)
+        if name == "data_to_code":
+            return self.data_to_code(tool_input["name"])
+        if name == "code_path":
+            return self.code_path(tool_input["source"], tool_input["target"],
+                                  int(tool_input.get("max_depth") or 8))
+        if name == "dead_code":
+            return self.dead_code(tool_input.get("repo") or None,
+                                  tool_input.get("subsystem") or None,
+                                  int(tool_input.get("top") or 30))
         if name == "code_impact":
             return self.code_impact(tool_input["symbol"],
                                     tool_input.get("direction") or "callers",

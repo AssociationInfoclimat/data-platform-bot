@@ -197,22 +197,34 @@ def list_corpus(subdir: str = "") -> str:
 _ci_on = lambda v: os.environ.get(v, "").lower() in ("1", "true", "yes")  # noqa: E731
 if _ci_on("CODE_INDEX_ENABLED") and _ci_on("CODE_INDEX_PUBLIC"):
     @mcp.tool()
-    def search_code(query: str, repo: str = "", k: int = 6) -> str:
+    def search_code(query: str, repo: str = "", k: int = 6, status: str = "",
+                    source: str = "", since: str = "") -> str:
         """Recherche HYBRIDE (sémantique + lexicale BM25, fusionnées) dans le code source des
         repos Infoclimat, sur des chunks contextualisés et avec réécriture automatique de la
-        requête. Pour « où/comment est implémenté X » ; renvoie repo/chemin:lignes."""
-        return _traced("search_code", {"query": query, "repo": repo},
-                       lambda: _safe(_tb.search_code, query, repo or None, k))
+        requête. Pour « où/comment est implémenté X » ; renvoie repo/chemin:lignes. Filtres
+        optionnels : status (actif/douteux/mort), source (github/gitlab/other), since (YYYY-MM-DD).
+        ENCHAÎNER ENSUITE — un extrait est un POINT D'ENTRÉE, pas une réponse : confirmer via
+        `read_file`, mesurer l'impact d'un symbole via `code_impact` (pas une nouvelle recherche),
+        relier table↔code via `data_to_code`. NE PAS reformuler la même recherche en boucle :
+        lire d'abord les extraits déjà obtenus."""
+        return _traced("search_code", {"query": query, "repo": repo, "status": status,
+                                        "source": source, "since": since},
+                       lambda: _safe(_tb.search_code, query, repo or None, k,
+                                     status or None, source or None, since or None))
 
 # Recherche sémantique de la GOUVERNANCE (corpus PUBLIC data-platform) : interrupteur maître
 # DOCS_INDEX_ENABLED (lancedb requiert AVX2). Pas d'opt-in public (corpus déjà public).
 if _ci_on("DOCS_INDEX_ENABLED"):
     @mcp.tool()
-    def search_docs(query: str, k: int = 8) -> str:
+    def search_docs(query: str, k: int = 8, status: str = "", source: str = "",
+                    since: str = "") -> str:
         """Recherche SÉMANTIQUE dans la gouvernance data-platform (contrats, inventory,
-        catalog, glossaire) — complément de grep/lineage ; renvoie chemin:lignes + URL."""
-        return _traced("search_docs", {"query": query},
-                       lambda: _safe(_tb.search_docs, query, k))
+        catalog, glossaire) — complément de grep/lineage ; renvoie chemin:lignes + URL. Filtres
+        optionnels : status (actif/douteux/mort), source (github/gitlab/other), since (YYYY-MM-DD)."""
+        return _traced("search_docs", {"query": query, "status": status, "source": source,
+                                       "since": since},
+                       lambda: _safe(_tb.search_docs, query, k,
+                                     status or None, source or None, since or None))
 
 # Graphe d'appels (Phase 4) : pur AST (artefact JSON, NI lancedb/AVX2 NI API). Structure du
 # code des repos PRIVÉS → opt-in CODE_INDEX_PUBLIC ; interrupteur GRAPH_INDEX_ENABLED (l'artefact
@@ -234,6 +246,32 @@ if _ci_on("GRAPH_INDEX_ENABLED") and _ci_on("CODE_INDEX_PUBLIC"):
         Filtrable par repo/sous-système."""
         return _traced("code_hotspots", {"top": top, "repo": repo, "by": by},
                        lambda: _safe(_tb.code_hotspots, top, repo or None, subsystem or None, by))
+
+    @mcp.tool()
+    def data_to_code(name: str) -> str:
+        """Pont registre DATA → CODE : pour une table/pipeline/dataset, liste les fichiers de
+        code qui la touchent (writers/readers, pipelines, sourceRepo/retroCompatLayer des
+        contrats) PUIS leur rayon d'impact (top appelants) via le graphe. Croise `lineage`
+        (DATA) et `code_impact` (code). Les fichiers hors graphe sont marqués."""
+        return _traced("data_to_code", {"name": name},
+                       lambda: _safe(_tb.data_to_code, name))
+
+    @mcp.tool()
+    def code_path(source: str, target: str, max_depth: int = 8) -> str:
+        """Plus court chemin d'appel entre DEUX symboles (A → B → C), avec la confiance de
+        chaque saut et repo/chemin:lignes. Complément de `code_impact` (rayon d'un seul
+        symbole). Si aucun chemin direct, tente le sens inverse et le signale. Résolution
+        statique (appels dynamiques non vus)."""
+        return _traced("code_path", {"source": source, "target": target, "max_depth": max_depth},
+                       lambda: _safe(_tb.code_path, source, target, max_depth))
+
+    @mcp.tool()
+    def dead_code(repo: str = "", subsystem: str = "", top: int = 30) -> str:
+        """Code potentiellement MORT : symboles à fan-in nul (jamais appelés) du graphe,
+        filtrable par repo/sous-système. CAVEAT en tête : les points d'entrée (routes, mains de
+        cron, hooks) ont légitimement 0 appelant — ne pas supprimer à l'aveugle."""
+        return _traced("dead_code", {"repo": repo, "subsystem": subsystem, "top": top},
+                       lambda: _safe(_tb.dead_code, repo or None, subsystem or None, top))
 
 
 # ── Resource (lecture par URI) ──────────────────────────────────────────────
